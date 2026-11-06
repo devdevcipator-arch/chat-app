@@ -2,7 +2,16 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { Avatar } from "@/components/avatar";
 import {
   MESSAGE_MAX,
@@ -14,7 +23,17 @@ import {
   type MessageRow,
   type PublicProfile,
 } from "@/lib/chat";
+import {
+  ACCEPTED_FILE_INPUT,
+  ACCEPTED_IMAGE_INPUTS,
+  AUDIO_TYPES,
+  MAX_UPLOAD_BYTES,
+  mediaPublicUrl,
+  type MediaMimeType,
+} from "@/lib/media";
+import { UploadError, compressImage, requestUploadUrl, uploadToR2 } from "@/lib/media-client";
 import { createClient } from "@/lib/supabase/client";
+import { AudioMessage, ImageMessage, Lightbox } from "./media";
 
 type Props = {
   chatId: string;
@@ -23,13 +42,36 @@ type Props = {
   initialMessages: ChatMessage[];
 };
 
+/** A file that has been validated (and compressed) and is ready to upload. */
+type PreparedMedia = {
+  blob: Blob;
+  type: MediaMimeType;
+  kind: "image" | "audio";
+  fileName: string;
+};
+
+const errorText = (e: unknown) =>
+  e instanceof UploadError ? e.message : "Something went wrong. Please try again.";
+
 export function ChatWindow({ chatId, meId, other, initialMessages }: Props) {
   const [supabase] = useState(createClient);
   const [messages, setMessages] = useState(initialMessages);
   const [connected, setConnected] = useState(true);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const closeLightbox = useCallback(() => setLightbox(null), []);
 
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
+  /** Prepared files by message id, kept so a failed upload can be retried. */
+  const pendingMedia = useRef(new Map<string, PreparedMedia>());
+  const objectUrls = useRef(new Set<string>());
+
+  // Release local previews when leaving the chat.
+  useEffect(() => {
+    const urls = objectUrls.current;
+    return () => urls.forEach((url) => URL.revokeObjectURL(url));
+  }, []);
 
   // Realtime: append new messages for this chat as they are inserted.
   useEffect(() => {
@@ -71,28 +113,44 @@ export function ChatWindow({ chatId, meId, other, initialMessages }: Props) {
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  const send = useCallback(
-    async (message: ChatMessage) => {
+  const patch = useCallback((id: string, changes: Partial<ChatMessage>) => {
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...changes } : m)));
+  }, []);
+
+  const insertMessage = useCallback(
+    async (message: ChatMessage, mediaKey: string | null) => {
       const { data, error } = await supabase
         .from("messages")
         .insert({
           id: message.id,
           chat_id: chatId,
           sender_id: meId,
-          message_type: "text",
+          message_type: message.message_type,
           content: message.content,
+          media_url: mediaKey,
         })
         .select()
         .single();
-
-      setMessages((prev) =>
-        mergeMessages(prev, [error || !data ? { ...message, status: "failed" } : data]),
-      );
+      if (error || !data) throw new UploadError("Message not sent. Please try again.");
+      setMessages((prev) => mergeMessages(prev, [data]));
     },
     [supabase, chatId, meId],
   );
 
-  function handleSend(content: string) {
+  // --- Text -----------------------------------------------------------------
+
+  const sendText = useCallback(
+    async (message: ChatMessage) => {
+      try {
+        await insertMessage(message, null);
+      } catch (e) {
+        patch(message.id, { status: "failed", error: errorText(e) });
+      }
+    },
+    [insertMessage, patch],
+  );
+
+  function handleSendText(content: string) {
     const optimistic: ChatMessage = {
       id: crypto.randomUUID(),
       chat_id: chatId,
@@ -105,13 +163,95 @@ export function ChatWindow({ chatId, meId, other, initialMessages }: Props) {
     };
     stickToBottom.current = true;
     setMessages((prev) => mergeMessages(prev, [optimistic]));
-    void send(optimistic);
+    void sendText(optimistic);
+  }
+
+  // --- Media ----------------------------------------------------------------
+
+  const sendMedia = useCallback(
+    async (message: ChatMessage, media: PreparedMedia) => {
+      try {
+        // 1. Presigned PUT URL from our API (auth + membership checked there).
+        const target = await requestUploadUrl({
+          chatId,
+          fileName: media.fileName,
+          fileType: media.type,
+          fileSize: media.blob.size,
+        });
+        // 2. Upload straight to R2; throttle progress updates to whole percents.
+        let lastPct = -1;
+        await uploadToR2(target, media.blob, (fraction) => {
+          const pct = Math.floor(fraction * 100);
+          if (pct !== lastPct) {
+            lastPct = pct;
+            patch(message.id, { progress: fraction });
+          }
+        });
+        // 3. Record the message. media_url stores the object key, not a URL.
+        await insertMessage(message, target.key);
+        pendingMedia.current.delete(message.id);
+      } catch (e) {
+        patch(message.id, { status: "failed", error: errorText(e), progress: undefined });
+      }
+    },
+    [chatId, insertMessage, patch],
+  );
+
+  async function prepare(file: File): Promise<PreparedMedia> {
+    if (ACCEPTED_IMAGE_INPUTS.includes(file.type)) {
+      const image = await compressImage(file);
+      if (image.blob.size > MAX_UPLOAD_BYTES.image) throw new UploadError("That image is too large.");
+      return { blob: image.blob, type: image.type, kind: "image", fileName: file.name };
+    }
+    if (file.type in AUDIO_TYPES) {
+      if (file.size > MAX_UPLOAD_BYTES.audio) {
+        throw new UploadError(`Audio files must be ${MAX_UPLOAD_BYTES.audio / 1024 / 1024} MB or smaller.`);
+      }
+      return { blob: file, type: file.type as MediaMimeType, kind: "audio", fileName: file.name };
+    }
+    throw new UploadError("Only images (JPEG, PNG, WebP, GIF, AVIF) and audio files are supported.");
+  }
+
+  async function handleAttach(file: File) {
+    setNotice(null);
+    let media: PreparedMedia;
+    try {
+      media = await prepare(file);
+    } catch (e) {
+      setNotice(errorText(e));
+      return;
+    }
+
+    const localUrl = URL.createObjectURL(media.blob);
+    objectUrls.current.add(localUrl);
+    const optimistic: ChatMessage = {
+      id: crypto.randomUUID(),
+      chat_id: chatId,
+      sender_id: meId,
+      message_type: media.kind,
+      content: null,
+      media_url: null,
+      created_at: new Date().toISOString(),
+      status: "sending",
+      localUrl,
+      progress: 0,
+    };
+    pendingMedia.current.set(optimistic.id, media);
+    stickToBottom.current = true;
+    setMessages((prev) => mergeMessages(prev, [optimistic]));
+    void sendMedia(optimistic, media);
   }
 
   function retry(message: ChatMessage) {
-    const again = { ...message, status: "sending" as const };
-    setMessages((prev) => mergeMessages(prev, [again]));
-    void send(again);
+    const again: Partial<ChatMessage> = { status: "sending", error: undefined };
+    const media = pendingMedia.current.get(message.id);
+    if (message.message_type !== "text" && media) {
+      patch(message.id, { ...again, progress: 0 });
+      void sendMedia(message, media);
+    } else {
+      patch(message.id, again);
+      void sendText(message);
+    }
   }
 
   const name = profileName(other);
@@ -161,25 +301,42 @@ export function ChatWindow({ chatId, meId, other, initialMessages }: Props) {
         ) : (
           <ol className="flex flex-col gap-1">
             <AnimatePresence initial={false}>
-              {messages.map((message, i) => {
-                const mine = message.sender_id === meId;
-                const grouped = messages[i - 1]?.sender_id === message.sender_id;
-                return (
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    mine={mine}
-                    grouped={grouped}
-                    onRetry={() => retry(message)}
-                  />
-                );
-              })}
+              {messages.map((message, i) => (
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  mine={message.sender_id === meId}
+                  grouped={messages[i - 1]?.sender_id === message.sender_id}
+                  onRetry={() => retry(message)}
+                  onOpenImage={setLightbox}
+                />
+              ))}
             </AnimatePresence>
           </ol>
         )}
       </div>
 
-      <Composer onSend={handleSend} />
+      <AnimatePresence>
+        {notice && (
+          <motion.div
+            role="alert"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="mx-3 mb-0 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-300">
+              <span className="flex-1">{notice}</span>
+              <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss" className="px-1 opacity-70 hover:opacity-100">
+                ✕
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <Composer onSend={handleSendText} onAttach={(file) => void handleAttach(file)} />
+      <Lightbox src={lightbox} onClose={closeLightbox} />
     </section>
   );
 }
@@ -189,16 +346,48 @@ function MessageBubble({
   mine,
   grouped,
   onRetry,
+  onOpenImage,
 }: {
   message: ChatMessage;
   mine: boolean;
   grouped: boolean;
   onRetry: () => void;
+  onOpenImage: (src: string) => void;
 }) {
   if (message.message_type === "system") {
-    return (
-      <li className="my-2 text-center text-xs text-zinc-500">{message.content}</li>
-    );
+    return <li className="my-2 text-center text-xs text-zinc-500">{message.content}</li>;
+  }
+
+  const sending = message.status === "sending";
+  const mediaSrc = message.localUrl ?? mediaPublicUrl(message.media_url);
+
+  let body;
+  switch (message.message_type) {
+    case "image":
+      body = <ImageMessage src={mediaSrc} progress={message.progress} sending={sending} onOpen={onOpenImage} />;
+      break;
+    case "audio":
+      body = <AudioMessage src={mediaSrc} mine={mine} />;
+      break;
+    case "text":
+      body = (
+        <div
+          className={`rounded-2xl px-3.5 py-2 text-[15px] leading-snug break-words whitespace-pre-wrap ${
+            mine
+              ? "rounded-br-md bg-indigo-600 text-white"
+              : "rounded-bl-md bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+          } ${sending ? "opacity-70" : ""}`}
+        >
+          {message.content}
+        </div>
+      );
+      break;
+    default:
+      body = (
+        <div className="rounded-2xl bg-zinc-100 px-3.5 py-2 text-sm text-zinc-500 italic dark:bg-zinc-800">
+          Unsupported message type
+        </div>
+      );
   }
 
   return (
@@ -209,25 +398,17 @@ function MessageBubble({
       className={`flex ${mine ? "justify-end" : "justify-start"} ${grouped ? "" : "mt-2"}`}
     >
       <div className={`flex max-w-[80%] flex-col md:max-w-[65%] ${mine ? "items-end" : "items-start"}`}>
-        <div
-          className={`rounded-2xl px-3.5 py-2 text-[15px] leading-snug break-words whitespace-pre-wrap ${
-            mine
-              ? "rounded-br-md bg-indigo-600 text-white"
-              : "rounded-bl-md bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
-          } ${message.status === "sending" ? "opacity-70" : ""}`}
-        >
-          {message.message_type === "text" ? message.content : <em>Unsupported message type</em>}
-        </div>
+        {body}
         <div className="mt-0.5 flex items-center gap-1.5 px-1 text-[11px] text-zinc-500">
           {message.status === "failed" ? (
             <>
-              <span className="text-red-600 dark:text-red-400">Not sent</span>
+              <span className="text-red-600 dark:text-red-400">{message.error ?? "Not sent"}</span>
               <button type="button" onClick={onRetry} className="font-medium text-indigo-600 hover:underline dark:text-indigo-400">
                 Retry
               </button>
             </>
-          ) : message.status === "sending" ? (
-            <span>Sending…</span>
+          ) : sending ? (
+            <span>{message.message_type === "text" ? "Sending…" : "Uploading…"}</span>
           ) : (
             <time suppressHydrationWarning dateTime={message.created_at}>
               {formatMessageTime(message.created_at)}
@@ -239,9 +420,10 @@ function MessageBubble({
   );
 }
 
-function Composer({ onSend }: { onSend: (content: string) => void }) {
+function Composer({ onSend, onAttach }: { onSend: (content: string) => void; onAttach: (file: File) => void }) {
   const [text, setText] = useState("");
   const input = useRef<HTMLTextAreaElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   // Auto-grow up to ~6 lines.
   useLayoutEffect(() => {
@@ -267,11 +449,37 @@ function Composer({ onSend }: { onSend: (content: string) => void }) {
     }
   }
 
+  function handleFiles(e: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // allow picking the same file again
+    files.slice(0, 10).forEach(onAttach);
+  }
+
   return (
-    <form
-      onSubmit={submit}
-      className="flex shrink-0 items-end gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800"
-    >
+    <form onSubmit={submit} className="flex shrink-0 items-end gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
+      <input
+        ref={fileInput}
+        type="file"
+        accept={ACCEPTED_FILE_INPUT}
+        multiple
+        onChange={handleFiles}
+        className="hidden"
+        tabIndex={-1}
+        aria-hidden
+      />
+      <button
+        type="button"
+        onClick={() => fileInput.current?.click()}
+        aria-label="Attach photo or audio"
+        title="Attach photo or audio"
+        className="flex size-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="size-5" aria-hidden>
+          <rect x="3" y="4" width="18" height="16" rx="3" />
+          <circle cx="9" cy="10" r="1.8" />
+          <path d="M21 16l-5-5-8 8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
       <textarea
         ref={input}
         value={text}

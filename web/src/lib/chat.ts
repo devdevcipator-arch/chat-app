@@ -4,7 +4,15 @@ import type { Database } from "@/lib/database.types";
 
 type ChatRow = Database["public"]["Functions"]["list_my_chats"]["Returns"][number];
 export type MessageRow = Database["public"]["Tables"]["messages"]["Row"];
-export type ChatMessage = MessageRow & { status?: "sending" | "failed" };
+export type ChatMessage = MessageRow & {
+  status?: "sending" | "failed";
+  /** Local object URL shown while (and after) uploading, to avoid flicker. */
+  localUrl?: string;
+  /** Upload progress 0–1 while sending media. */
+  progress?: number;
+  /** Why a send failed, shown under the bubble. */
+  error?: string;
+};
 
 export type PublicProfile = {
   id: string;
@@ -80,7 +88,11 @@ export function messageSnippet(type: string, content: string | null) {
 /** Insert or replace messages by id, keeping chronological order. */
 export function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]) {
   const byId = new Map(current.map((m) => [m.id, m]));
-  for (const message of incoming) byId.set(message.id, message);
+  for (const message of incoming) {
+    // Keep the local preview when the server copy replaces the optimistic one.
+    const localUrl = message.localUrl ?? byId.get(message.id)?.localUrl;
+    byId.set(message.id, localUrl ? { ...message, localUrl } : message);
+  }
   return [...byId.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
 }
 
