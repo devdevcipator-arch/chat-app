@@ -1,49 +1,42 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// Passed at build time so nothing is hard-coded:
-//   flutter run --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_PUBLISHABLE_KEY=...
-const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-const supabaseKey = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
+import 'app.dart';
+import 'core/config.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  assert(supabaseUrl.isNotEmpty && supabaseKey.isNotEmpty,
-      'Missing --dart-define SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY');
 
-  await Supabase.initialize(url: supabaseUrl, anonKey: supabaseKey);
+  if (!AppConfig.isConfigured) {
+    runApp(const _MissingConfigApp());
+    return;
+  }
+
+  await Supabase.initialize(
+    url: AppConfig.supabaseUrl,
+    publishableKey: AppConfig.supabasePublishableKey,
+  );
   runApp(const ChatApp());
 }
 
-final supabase = Supabase.instance.client;
-
-class ChatApp extends StatelessWidget {
-  const ChatApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Chat App',
-      theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
-      darkTheme: ThemeData(
-        colorSchemeSeed: Colors.indigo,
-        brightness: Brightness.dark,
-        useMaterial3: true,
-      ),
-      home: const HomeScreen(),
-    );
-  }
-}
-
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+/// Shown instead of crashing when the app was built without env.json.
+class _MissingConfigApp extends StatelessWidget {
+  const _MissingConfigApp();
 
   @override
   Widget build(BuildContext context) {
-    final signedIn = supabase.auth.currentSession != null;
-    return Scaffold(
-      body: Center(
-        child: Text(signedIn ? 'Signed in' : 'Chat App — not signed in'),
+    return const MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Missing Supabase configuration.\n\n'
+              'Build with: --dart-define-from-file=env.json',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
       ),
     );
   }

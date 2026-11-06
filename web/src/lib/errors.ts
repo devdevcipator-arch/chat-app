@@ -2,13 +2,22 @@ import { isAuthError, isAuthRetryableFetchError } from "@supabase/supabase-js";
 
 const GENERIC = "Something went wrong. Please try again.";
 const OFFLINE = "Can't reach the server. Check your connection and try again.";
+const EMAIL_FAILED = "We couldn't send the sign-in email right now. Please try again in a few minutes.";
+const SERVER_PROBLEM = "The server ran into a problem. Please try again shortly.";
 
 /** User-friendly message for Supabase Auth errors. */
 export function authErrorMessage(error: unknown): string {
-  if (isAuthRetryableFetchError(error) || error instanceof TypeError) {
-    return OFFLINE;
+  if (error instanceof TypeError) return OFFLINE;
+
+  // supabase-js reports every 5xx as a "retryable fetch error" too; only
+  // status 0 means the request never reached the server.
+  if (isAuthRetryableFetchError(error)) {
+    if (!error.status) return OFFLINE;
+    if (/sending .*email/i.test(error.message)) return EMAIL_FAILED;
+    return SERVER_PROBLEM;
   }
   if (!isAuthError(error)) return GENERIC;
+  if (/sending .*email/i.test(error.message)) return EMAIL_FAILED;
 
   switch (error.code) {
     case "otp_expired":

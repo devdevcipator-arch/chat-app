@@ -8,3 +8,6 @@ build/
 *.iml
 .idea/
 dart_defines.json
+
+# Build-time config (create from env.example.json)
+env.json
