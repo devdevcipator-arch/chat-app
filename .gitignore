@@ -1,0 +1,12 @@
+# secrets (never commit)
+.envrc
+.env
+.env*.local
+.env.keys
+
+# OS / editors
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
