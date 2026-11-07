@@ -33,6 +33,7 @@ import {
 } from "@/lib/media";
 import { UploadError, compressImage, requestUploadUrl, uploadToR2 } from "@/lib/media-client";
 import { createClient } from "@/lib/supabase/client";
+import { CallButton } from "../call/call-button";
 import { AudioMessage, ImageMessage, Lightbox } from "./media";
 
 type Props = {
@@ -278,6 +279,7 @@ export function ChatWindow({ chatId, meId, other, initialMessages }: Props) {
             Reconnecting…
           </span>
         )}
+        <CallButton peer={other ? { ...other, chatId } : null} />
       </header>
 
       <div

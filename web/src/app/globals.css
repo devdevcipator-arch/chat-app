@@ -24,3 +24,17 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
 }
+
+/* Ringing handset on the incoming-call Accept button. */
+@keyframes wiggle {
+  0%, 60%, 100% { transform: rotate(0deg); }
+  10%, 30%, 50% { transform: rotate(-14deg); }
+  20%, 40% { transform: rotate(14deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-ping,
+  [class*="animate-[wiggle"] {
+    animation: none;
+  }
+}

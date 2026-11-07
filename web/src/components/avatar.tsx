@@ -1,6 +1,8 @@
 const sizes = {
   sm: "size-9 text-xs",
   md: "size-10 text-sm",
+  lg: "size-14 text-lg",
+  xl: "size-28 text-4xl",
 } as const;
 
 // Initials placeholder until avatar uploads (R2) land.

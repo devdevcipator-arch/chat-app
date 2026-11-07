@@ -14,6 +14,74 @@ export type Database = {
   }
   public: {
     Tables: {
+      calls: {
+        Row: {
+          answered_at: string | null
+          callee_id: string
+          caller_id: string
+          chat_id: string
+          created_at: string
+          ended_at: string | null
+          ended_by: string | null
+          id: string
+          last_seen_at: string
+          status: string
+        }
+        Insert: {
+          answered_at?: string | null
+          callee_id: string
+          caller_id: string
+          chat_id: string
+          created_at?: string
+          ended_at?: string | null
+          ended_by?: string | null
+          id?: string
+          last_seen_at?: string
+          status?: string
+        }
+        Update: {
+          answered_at?: string | null
+          callee_id?: string
+          caller_id?: string
+          chat_id?: string
+          created_at?: string
+          ended_at?: string | null
+          ended_by?: string | null
+          id?: string
+          last_seen_at?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calls_callee_id_fkey"
+            columns: ["callee_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "calls_caller_id_fkey"
+            columns: ["caller_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "calls_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "chats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "calls_ended_by_fkey"
+            columns: ["ended_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       chat_participants: {
         Row: {
           chat_id: string
@@ -163,6 +231,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      answer_call: {
+        Args: { p_accept: boolean; p_call_id: string }
+        Returns: Database["public"]["Tables"]["calls"]["Row"]
+      }
+      end_call: {
+        Args: { p_call_id: string; p_timeout?: boolean }
+        Returns: Database["public"]["Tables"]["calls"]["Row"]
+      }
+      heartbeat_call: { Args: { p_call_id: string }; Returns: boolean }
+      start_call: {
+        Args: { p_chat_id: string }
+        Returns: Database["public"]["Tables"]["calls"]["Row"]
+      }
       create_direct_chat: { Args: { p_other_user: string }; Returns: string }
       find_profile_by_username: {
         Args: { p_username: string }

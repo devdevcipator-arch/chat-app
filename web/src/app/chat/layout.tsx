@@ -2,24 +2,29 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getOnboardedProfile } from "@/lib/auth";
 import { getMyChats } from "@/lib/chat-data";
+import { CallProvider } from "./call/call-provider";
 import { ChatSidebar } from "./chat-sidebar";
 
 export const metadata: Metadata = { title: "Chats · Chat App" };
 
 // On mobile only one pane shows: the list at /chat, the conversation at
 // /chat/[chatId]. Pages that are an open chat render `data-chat-open`.
+// CallProvider lives here so calls ring on every /chat route and keep going
+// while you switch between chats.
 export default function ChatLayout({ children }: LayoutProps<"/chat">) {
   return (
-    <div className="group/frame flex h-dvh">
-      <aside className="flex w-full shrink-0 flex-col border-zinc-200 bg-zinc-50 md:w-80 md:border-r max-md:group-has-[[data-chat-open]]/frame:hidden dark:border-zinc-800 dark:bg-zinc-950">
-        <Suspense fallback={<SidebarSkeleton />}>
-          <SidebarLoader />
-        </Suspense>
-      </aside>
-      <main className="min-w-0 flex-1 max-md:hidden max-md:group-has-[[data-chat-open]]/frame:flex md:flex">
-        {children}
-      </main>
-    </div>
+    <CallProvider>
+      <div className="group/frame flex h-dvh">
+        <aside className="flex w-full shrink-0 flex-col border-zinc-200 bg-zinc-50 md:w-80 md:border-r max-md:group-has-[[data-chat-open]]/frame:hidden dark:border-zinc-800 dark:bg-zinc-950">
+          <Suspense fallback={<SidebarSkeleton />}>
+            <SidebarLoader />
+          </Suspense>
+        </aside>
+        <main className="min-w-0 flex-1 max-md:hidden max-md:group-has-[[data-chat-open]]/frame:flex md:flex">
+          {children}
+        </main>
+      </div>
+    </CallProvider>
   );
 }
 
