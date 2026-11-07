@@ -82,6 +82,22 @@ export async function createGroup(
   return { ok: true, chatId: data };
 }
 
+/**
+ * Opens the 1-on-1 chat with someone: the existing one (un-hidden if I had
+ * deleted it) or a new one. Tells the sidebar to pick it up.
+ */
+export async function openDirectChat(
+  supabase: Client,
+  userId: string,
+): Promise<{ ok: true; chatId: string } | { ok: false; error: string }> {
+  const { data, error } = await supabase.rpc("create_direct_chat", { p_other_user: userId });
+  if (error?.code === "P0002") return { ok: false, error: "That account is no longer available." };
+  if (error) return { ok: false, error: errorMessage(error) };
+  if (!data) return { ok: false, error: "Couldn't open the chat. Please try again." };
+  emitChatEvent({ type: "updated", chatId: data });
+  return { ok: true, chatId: data };
+}
+
 export async function renameGroup(supabase: Client, chatId: string, title: string): Promise<ActionResult> {
   const { error } = await supabase.rpc("update_group", { p_chat_id: chatId, p_title: title });
   if (error) return failure(error);

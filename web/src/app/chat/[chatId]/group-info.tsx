@@ -3,12 +3,14 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
+import { Spinner } from "@/components/auth-card";
 import { Avatar } from "@/components/avatar";
 import { ConfirmDialog, Dialog } from "@/components/dialog";
 import { Menu } from "@/components/menu";
 import {
   addMembers,
   leaveGroup,
+  openDirectChat,
   removeMember,
   renameGroup,
   setRole,
@@ -82,7 +84,24 @@ function Panel({ details, meId, onClose }: { details: ChatDetails; meId: string;
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Member whose direct chat is being opened (blocks double clicks). */
+  const [messagingId, setMessagingId] = useState<string | null>(null);
   const title = details.title ?? "Group";
+
+  /** Open (or create) the 1-on-1 chat with a member and go there. */
+  async function messageMember(member: ChatMember) {
+    if (messagingId) return;
+    setMessagingId(member.id);
+    setError(null);
+    const result = await openDirectChat(supabase, member.id);
+    if (!result.ok) {
+      setMessagingId(null);
+      setError(result.error);
+      return;
+    }
+    onClose();
+    router.push(`/chat/${result.chatId}`);
+  }
 
   async function run(action: () => Promise<ActionResult>) {
     setBusy(true);
@@ -173,23 +192,58 @@ function Panel({ details, meId, onClose }: { details: ChatDetails; meId: string;
           <ul>
             {details.members.map((member) => {
               const isMe = member.id === meId;
+              const name = profileName(member);
+              // Accounts without a username were deleted or never finished
+              // signing up; there's no one to message.
+              const canMessage = !isMe && !!member.username;
+              const opening = messagingId === member.id;
+              const identity = (
+                <>
+                  <Avatar name={name} size="sm" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{isMe ? "You" : name}</span>
+                    <span className="block truncate text-xs text-zinc-500">
+                      {member.username ? `@${member.username}` : "Account unavailable"}
+                    </span>
+                  </span>
+                </>
+              );
               return (
-                <li key={member.id} className="flex items-center gap-3 rounded-lg px-2 py-2">
-                  <Avatar name={profileName(member)} size="sm" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">
-                      {isMe ? "You" : profileName(member)}
-                    </p>
-                    {member.username && <p className="truncate text-xs text-zinc-500">@{member.username}</p>}
-                  </div>
+                <li key={member.id} className="group/member flex items-center gap-2 rounded-lg px-1 py-0.5">
+                  {canMessage ? (
+                    <button
+                      type="button"
+                      onClick={() => void messageMember(member)}
+                      disabled={messagingId !== null}
+                      aria-label={`Message ${name}`}
+                      aria-busy={opening}
+                      title={`Message ${name}`}
+                      className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-1 py-1.5 text-left transition outline-none hover:bg-zinc-100 focus-visible:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-indigo-500/40 disabled:cursor-default disabled:opacity-70 dark:hover:bg-zinc-800/70 dark:focus-visible:bg-zinc-800/70"
+                    >
+                      {identity}
+                      {/* Space is always reserved, so nothing shifts on hover. */}
+                      <span
+                        aria-hidden
+                        className={`flex size-8 shrink-0 items-center justify-center rounded-full text-indigo-600 transition-opacity dark:text-indigo-400 ${
+                          opening
+                            ? "opacity-100"
+                            : "opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within/member:opacity-100 [@media(hover:hover)]:group-hover/member:opacity-100"
+                        }`}
+                      >
+                        {opening ? <Spinner /> : <MessageIcon />}
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="flex min-w-0 flex-1 items-center gap-3 px-1 py-1.5">{identity}</div>
+                  )}
                   {member.role === "admin" && (
-                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                    <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
                       Admin
                     </span>
                   )}
                   {isAdmin && !isMe && (
                     <Menu
-                      label={`Options for ${profileName(member)}`}
+                      label={`Options for ${name}`}
                       items={[
                         member.role === "admin"
                           ? {
@@ -349,5 +403,22 @@ function AddMembersForm({
         </button>
       </div>
     </div>
+  );
+}
+
+function MessageIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.9}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="size-4.5"
+      aria-hidden
+    >
+      <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z" />
+    </svg>
   );
 }
