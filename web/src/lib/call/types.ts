@@ -5,7 +5,8 @@ import type { PublicProfile } from "@/lib/chat";
 
 export type CallRow = Database["public"]["Tables"]["calls"]["Row"];
 
-export const CALL_STATUSES = ["ringing", "accepted", "declined", "cancelled", "missed", "ended"] as const;
+/** "active" is a group call in progress (group calls never ring). */
+export const CALL_STATUSES = ["ringing", "accepted", "declined", "cancelled", "missed", "ended", "active"] as const;
 export type CallStatus = (typeof CALL_STATUSES)[number];
 
 export type CallType = "voice" | "video";
@@ -25,6 +26,12 @@ export type CallSignal =
 
 /** The person on the other end, plus the chat the call belongs to. */
 export type CallPeer = PublicProfile & { chatId: string };
+
+/** A group chat to call, with its members (to name everyone in the room). */
+export type GroupCallInfo = { chatId: string; title: string; members: PublicProfile[] };
+
+/** Where a call button points. */
+export type CallTarget = { kind: "direct"; peer: CallPeer | null } | { kind: "group"; group: GroupCallInfo };
 
 /** Why a call finished, from the local user's point of view. */
 export type CallEndReason =
@@ -46,7 +53,24 @@ export type CallPhase =
   | { phase: "incoming"; call: CallRow; peer: CallPeer }
   | { phase: "connecting"; call: CallRow; peer: CallPeer }
   | { phase: "active"; call: CallRow; peer: CallPeer; connectedAt: number; reconnecting: boolean }
-  | { phase: "ended"; peer: CallPeer; callType: CallType; reason: CallEndReason; message: string };
+  /** In a group room. `call` is null until start_call returns. */
+  | {
+      phase: "group";
+      call: CallRow | null;
+      group: GroupCallInfo;
+      callType: CallType;
+      status: "joining" | "live";
+      reconnecting: boolean;
+    }
+  | {
+      phase: "ended";
+      /** For group calls, a stand-in "peer" named after the group. */
+      peer: CallPeer;
+      callType: CallType;
+      group: boolean;
+      reason: CallEndReason;
+      message: string;
+    };
 
 /** Agora channel names are `call_<chatId>`. */
 export const callChannelName = (chatId: string) => `call_${chatId}`;

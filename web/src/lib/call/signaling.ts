@@ -1,6 +1,6 @@
 import type { RealtimePostgresChangesPayload, SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
-import { isCallStatus, type CallRow, type CallSignal, type CallType } from "@/lib/call/types";
+import { asCallType, isCallStatus, type CallRow, type CallSignal, type CallType } from "@/lib/call/types";
 
 // Call signaling over Supabase: RPCs change state (server-validated) and
 // postgres_changes on `calls` deliver every change to both parties.
@@ -11,6 +11,8 @@ type Client = SupabaseClient<Database>;
 export function toSignal(meId: string, event: "INSERT" | "UPDATE", call: CallRow): CallSignal | null {
   if (!isCallStatus(call.status)) return null;
   switch (call.status) {
+    case "active":
+      return null; // group room pings; the room's own UI polls get_group_call
     case "ringing":
       if (event !== "INSERT") return null;
       return call.caller_id === meId ? { type: "call:outgoing", call } : { type: "call:incoming", call };
@@ -53,13 +55,14 @@ export function subscribeToCalls(
 
 export type StartCallResult =
   | { ok: true; call: CallRow }
-  | { ok: false; reason: "callee-busy" | "caller-busy" | "unavailable" | "error" };
+  | { ok: false; reason: "callee-busy" | "caller-busy" | "call-full" | "unavailable" | "error" };
 
 export async function startCall(supabase: Client, chatId: string, callType: CallType): Promise<StartCallResult> {
   const { data, error } = await supabase.rpc("start_call", { p_chat_id: chatId, p_call_type: callType });
   if (!error && data) return { ok: true, call: data };
   if (error?.message === "callee busy") return { ok: false, reason: "callee-busy" };
   if (error?.message === "caller busy") return { ok: false, reason: "caller-busy" };
+  if (error?.message === "call full") return { ok: false, reason: "call-full" };
   if (error?.code === "P0002") return { ok: false, reason: "unavailable" };
   return { ok: false, reason: "error" };
 }
@@ -79,6 +82,39 @@ export async function endCall(supabase: Client, callId: string, timeout = false)
 export async function heartbeatCall(supabase: Client, callId: string): Promise<boolean | null> {
   const { data, error } = await supabase.rpc("heartbeat_call", { p_call_id: callId });
   return error ? null : data; // null: network hiccup, try again next beat
+}
+
+export type ActiveGroupCall = {
+  callId: string;
+  callType: CallType;
+  startedAt: string;
+  participantIds: string[];
+};
+
+/** The group's ongoing call, if any (also closes a room everyone abandoned). */
+export async function fetchGroupCall(supabase: Client, chatId: string): Promise<ActiveGroupCall | null> {
+  const { data, error } = await supabase.rpc("get_group_call", { p_chat_id: chatId });
+  const row = error ? null : data?.[0];
+  if (!row) return null;
+  return {
+    callId: row.call_id,
+    callType: asCallType(row.call_type),
+    startedAt: row.started_at,
+    participantIds: row.participant_ids ?? [],
+  };
+}
+
+/** Fires whenever a call row in this chat changes (group rooms ping it on join/leave). */
+export function subscribeToChatCalls(supabase: Client, chatId: string, onChange: () => void) {
+  const channel = supabase
+    .channel(`chat-calls:${chatId}`)
+    .on("postgres_changes", { event: "*", schema: "public", table: "calls", filter: `chat_id=eq.${chatId}` }, onChange)
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") onChange();
+    });
+  return () => {
+    void supabase.removeChannel(channel);
+  };
 }
 
 /** Calls still ringing for me (e.g. they started before this page loaded). */

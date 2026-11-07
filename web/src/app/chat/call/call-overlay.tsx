@@ -11,22 +11,30 @@ import {
   phaseCallType,
   statusText,
   useCallClock,
+  type DirectPhase,
   type ShownPhase,
 } from "./call-ui";
 import { useCall } from "./call-provider";
+import { GroupCallScreen, GroupPill } from "./group-call";
 import { ExpandIcon, MicIcon, MicOffIcon, MinimizeIcon, PhoneDownIcon, SettingsIcon } from "./icons";
 import { VideoCallScreen, VideoPill } from "./video-call";
 
-/** Outgoing / connecting / active / ended call screen, minimizable. */
+/** The call screen (1-on-1 voice/video or a group room), minimizable. */
 export function CallOverlay() {
   const { call, media, controller } = useCall();
   const [minimizedFor, setMinimizedFor] = useState<string | null>(null);
 
   const shown: ShownPhase | null = call.phase === "idle" || call.phase === "incoming" ? null : call;
   // Minimizing applies to one call; a new call opens full screen again.
-  const callKey = shown ? ("call" in shown ? shown.call.id : `${shown.phase}:${shown.peer.id}`) : null;
+  const callKey = !shown
+    ? null
+    : shown.phase === "group"
+      ? `group:${shown.group.chatId}`
+      : "call" in shown
+        ? shown.call.id
+        : `${shown.phase}:${shown.peer.id}`;
   const minimized = !!callKey && minimizedFor === callKey;
-  // The "call ended" card is the same for both kinds of call.
+  // The "call ended" card is the same for every kind of call.
   const video = !!shown && shown.phase !== "ended" && phaseCallType(shown) === "video";
   const minimize = () => callKey && setMinimizedFor(callKey);
   const expand = () => setMinimizedFor(null);
@@ -42,8 +50,21 @@ export function CallOverlay() {
   }, [callKey, minimized]);
 
   if (!shown || !controller) return <AnimatePresence />;
-  const props = { call: shown, media, controller };
 
+  if (shown.phase === "group") {
+    const props = { call: shown, media, controller };
+    return (
+      <AnimatePresence>
+        {minimized ? (
+          <GroupPill key="group-pill" {...props} onExpand={expand} />
+        ) : (
+          <GroupCallScreen key="group-full" {...props} onMinimize={minimize} />
+        )}
+      </AnimatePresence>
+    );
+  }
+
+  const props = { call: shown, media, controller };
   return (
     <AnimatePresence>
       {!minimized &&
@@ -62,7 +83,7 @@ export function CallOverlay() {
   );
 }
 
-type ViewProps = { call: ShownPhase; media: MediaState; controller: CallController };
+type ViewProps = { call: DirectPhase; media: MediaState; controller: CallController };
 
 function FullScreen({ call, media, controller, onMinimize }: ViewProps & { onMinimize: () => void }) {
   const elapsed = useCallClock(call);
@@ -110,7 +131,7 @@ function FullScreen({ call, media, controller, onMinimize }: ViewProps & { onMin
           {call.phase === "active" && !call.reconnecting && (
             <span className="absolute -inset-2 rounded-full border-2 border-emerald-400/60" aria-hidden />
           )}
-          <Avatar name={name} size="xl" />
+          <Avatar name={name} size="xl" group={call.phase === "ended" && call.group} />
         </div>
         <div className="space-y-1.5">
           <h2 className="text-2xl font-semibold">{name}</h2>

@@ -15,9 +15,9 @@ const fail = (status: number, error: string) =>
 /**
  * POST /api/agora/token
  * Body: { channelName: "call_<chatId>" }
- * Returns a 1-hour Agora RTC publisher token. Only a party to an open
- * (ringing or accepted) call in that chat can get one, so chat membership
- * alone is not enough to join, or listen in on, a call channel.
+ * Returns a 1-hour Agora RTC publisher token. Only someone in that chat's open
+ * call can get one (a 1-on-1 party, or a joined group participant), so chat
+ * membership alone is not enough to join, or listen in on, a call channel.
  */
 export async function POST(request: NextRequest) {
   // 1. Authenticated users only.
@@ -40,17 +40,11 @@ export async function POST(request: NextRequest) {
   if (!match) return fail(400, "Invalid channel.");
   const chatId = match[1].toLowerCase();
 
-  // 3. The caller must be in an open call in this chat (RLS: own calls only).
-  const { data: call, error } = await supabase
-    .from("calls")
-    .select("id")
-    .eq("chat_id", chatId)
-    .in("status", ["ringing", "accepted"])
-    .or(`caller_id.eq.${userId},callee_id.eq.${userId}`)
-    .limit(1)
-    .maybeSingle();
+  // 3. The caller must be in this chat's open call: a party to a ringing or
+  //    accepted 1-on-1 call, or a current participant of the group call.
+  const { data: allowed, error } = await supabase.rpc("can_join_call_channel", { p_chat_id: chatId });
   if (error) return fail(500, "Something went wrong. Please try again.");
-  if (!call) return fail(403, "There's no active call in this chat.");
+  if (!allowed) return fail(403, "There's no active call in this chat.");
 
   // 4. Sign.
   const config = getAgoraConfig();

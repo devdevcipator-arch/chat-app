@@ -8,9 +8,14 @@ import { callTypeOf, type CallPhase, type CallType } from "@/lib/call/types";
 // Pieces shared by the voice and video call screens.
 
 export type ShownPhase = Exclude<CallPhase, { phase: "idle" } | { phase: "incoming" }>;
+/** Phases of a 1-on-1 call (everything but a group room). */
+export type DirectPhase = Exclude<ShownPhase, { phase: "group" }>;
+export type GroupPhase = Extract<ShownPhase, { phase: "group" }>;
 
 export function phaseCallType(call: ShownPhase): CallType {
-  return call.phase === "starting" || call.phase === "ended" ? call.callType : callTypeOf(call.call);
+  return call.phase === "starting" || call.phase === "ended" || call.phase === "group"
+    ? call.callType
+    : callTypeOf(call.call);
 }
 
 export function statusText(call: ShownPhase, elapsed: string) {
@@ -22,6 +27,9 @@ export function statusText(call: ShownPhase, elapsed: string) {
     case "connecting":
       return "Connecting…";
     case "active":
+      return call.reconnecting ? "Reconnecting…" : elapsed;
+    case "group":
+      if (call.status === "joining") return "Joining…";
       return call.reconnecting ? "Reconnecting…" : elapsed;
     case "ended":
       return call.message;
@@ -48,9 +56,15 @@ export function formatDuration(ms: number) {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
 
-/** Timer text for an active call, "" otherwise. */
+/** Timer text: since we connected (1-on-1), or since the room opened (group). */
 export function useCallClock(call: ShownPhase) {
-  return formatDuration(useElapsed(call.phase === "active" ? call.connectedAt : null));
+  const since =
+    call.phase === "active"
+      ? call.connectedAt
+      : call.phase === "group" && call.status === "live" && call.call
+        ? Date.parse(call.call.created_at)
+        : null;
+  return formatDuration(useElapsed(since));
 }
 
 export function RoundButton({

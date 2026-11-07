@@ -14,43 +14,85 @@ export type Database = {
   }
   public: {
     Tables: {
+      call_participants: {
+        Row: {
+          call_id: string
+          joined_at: string
+          last_seen_at: string
+          left_at: string | null
+          user_id: string
+        }
+        Insert: {
+          call_id: string
+          joined_at?: string
+          last_seen_at?: string
+          left_at?: string | null
+          user_id: string
+        }
+        Update: {
+          call_id?: string
+          joined_at?: string
+          last_seen_at?: string
+          left_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_participants_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_participants_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       calls: {
         Row: {
           answered_at: string | null
           call_type: string
-          callee_id: string
+          callee_id: string | null
           caller_id: string
           chat_id: string
           created_at: string
           ended_at: string | null
           ended_by: string | null
           id: string
+          is_group: boolean
           last_seen_at: string
           status: string
         }
         Insert: {
           answered_at?: string | null
           call_type?: string
-          callee_id: string
+          callee_id?: string | null
           caller_id: string
           chat_id: string
           created_at?: string
           ended_at?: string | null
           ended_by?: string | null
           id?: string
+          is_group?: boolean
           last_seen_at?: string
           status?: string
         }
         Update: {
           answered_at?: string | null
           call_type?: string
-          callee_id?: string
+          callee_id?: string | null
           caller_id?: string
           chat_id?: string
           created_at?: string
           ended_at?: string | null
           ended_by?: string | null
           id?: string
+          is_group?: boolean
           last_seen_at?: string
           status?: string
         }
@@ -275,13 +317,14 @@ export type Database = {
         Returns: {
           answered_at: string | null
           call_type: string
-          callee_id: string
+          callee_id: string | null
           caller_id: string
           chat_id: string
           created_at: string
           ended_at: string | null
           ended_by: string | null
           id: string
+          is_group: boolean
           last_seen_at: string
           status: string
         }
@@ -292,6 +335,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      can_join_call_channel: { Args: { p_chat_id: string }; Returns: boolean }
       clear_chat: { Args: { p_chat_id: string }; Returns: undefined }
       create_direct_chat: { Args: { p_other_user: string }; Returns: string }
       create_group_chat: {
@@ -304,13 +348,14 @@ export type Database = {
         Returns: {
           answered_at: string | null
           call_type: string
-          callee_id: string
+          callee_id: string | null
           caller_id: string
           chat_id: string
           created_at: string
           ended_at: string | null
           ended_by: string | null
           id: string
+          is_group: boolean
           last_seen_at: string
           status: string
         }
@@ -335,6 +380,15 @@ export type Database = {
         Returns: {
           is_muted: boolean
           role: string
+        }[]
+      }
+      get_group_call: {
+        Args: { p_chat_id: string }
+        Returns: {
+          call_id: string
+          call_type: string
+          participant_ids: string[]
+          started_at: string
         }[]
       }
       heartbeat_call: { Args: { p_call_id: string }; Returns: boolean }
@@ -381,13 +435,14 @@ export type Database = {
         Returns: {
           answered_at: string | null
           call_type: string
-          callee_id: string
+          callee_id: string | null
           caller_id: string
           chat_id: string
           created_at: string
           ended_at: string | null
           ended_by: string | null
           id: string
+          is_group: boolean
           last_seen_at: string
           status: string
         }

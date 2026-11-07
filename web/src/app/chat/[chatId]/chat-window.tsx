@@ -25,6 +25,7 @@ import {
   type MessageRow,
   type PublicProfile,
 } from "@/lib/chat";
+import type { CallTarget, GroupCallInfo } from "@/lib/call/types";
 import { fetchChatDetails } from "@/lib/chat-actions";
 import { onChatEvent } from "@/lib/chat-events";
 import {
@@ -38,6 +39,7 @@ import {
 import { UploadError, compressImage, requestUploadUrl, uploadToR2 } from "@/lib/media-client";
 import { createClient } from "@/lib/supabase/client";
 import { CallButton } from "../call/call-button";
+import { GroupCallBanner } from "../call/group-call-banner";
 import { ChatMenu } from "../chat-menu";
 import { GroupInfo } from "./group-info";
 import { AudioMessage, ImageMessage, Lightbox } from "./media";
@@ -68,6 +70,13 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
   const [infoOpen, setInfoOpen] = useState(false);
   const closeInfo = useCallback(() => setInfoOpen(false), []);
   const group = details.type === "group";
+  /** Who the header call buttons call: the other person, or the whole group. */
+  const groupCall: GroupCallInfo | null = group
+    ? { chatId, title: details.title || "Group", members: details.members }
+    : null;
+  const callTarget: CallTarget = groupCall
+    ? { kind: "group", group: groupCall }
+    : { kind: "direct", peer: other ? { ...other, chatId } : null };
   const [connected, setConnected] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -341,12 +350,8 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
             Reconnecting…
           </span>
         )}
-        {!group && (
-          <>
-            <CallButton peer={other ? { ...other, chatId } : null} type="video" />
-            <CallButton peer={other ? { ...other, chatId } : null} type="voice" />
-          </>
-        )}
+        <CallButton target={callTarget} type="video" />
+        <CallButton target={callTarget} type="voice" />
         <ChatMenu
           chatId={chatId}
           type={details.type}
@@ -357,6 +362,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
           triggerClassName="size-10"
         />
       </header>
+      {groupCall && <GroupCallBanner group={groupCall} />}
 
       <div
         ref={scroller}

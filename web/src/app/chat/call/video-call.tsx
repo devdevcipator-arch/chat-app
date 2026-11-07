@@ -6,7 +6,7 @@ import { useRef, useState } from "react";
 import { Avatar } from "@/components/avatar";
 import type { CallController, MediaState } from "@/lib/call/controller";
 import { profileName } from "@/lib/chat";
-import { DevicePicker, RoundButton, statusText, useCallClock, type ShownPhase } from "./call-ui";
+import { DevicePicker, RoundButton, statusText, useCallClock, type DirectPhase } from "./call-ui";
 import {
   ExpandIcon,
   FlipIcon,
@@ -20,7 +20,7 @@ import {
 } from "./icons";
 import { VideoView } from "./video-view";
 
-type Props = { call: ShownPhase; media: MediaState; controller: CallController };
+type Props = { call: DirectPhase; media: MediaState; controller: CallController };
 
 /** The tracks to show right now (null = show the avatar fallback). */
 function useTracks(media: MediaState, controller: CallController) {
@@ -32,7 +32,7 @@ function useTracks(media: MediaState, controller: CallController) {
   };
 }
 
-function remoteFallbackLabel(call: ShownPhase) {
+function remoteFallbackLabel(call: DirectPhase) {
   switch (call.phase) {
     case "starting":
       return "Starting…";

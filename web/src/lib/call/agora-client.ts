@@ -6,13 +6,14 @@ import type {
   IAgoraRTCRemoteUser,
   ICameraVideoTrack,
   IMicrophoneAudioTrack,
-  IRemoteAudioTrack,
   IRemoteVideoTrack,
 } from "agora-rtc-sdk-ng";
 import type { AgoraTokenError, AgoraTokenResponse } from "@/lib/call/types";
 
-// Browser-only wrapper around the Agora Web SDK for a 1-on-1 call: always a
-// microphone, plus an optional camera that can be switched on and off.
+// Browser-only wrapper around the Agora Web SDK for one call (1-on-1 or a
+// group room): always a microphone, plus an optional camera that can be
+// switched on and off. Every remote participant's audio plays; their video is
+// exposed per participant for the UI to render.
 // The SDK is imported lazily: it touches `window` at module load, and most
 // page views never place a call.
 
@@ -80,13 +81,23 @@ export type MediaDevices = {
   cameras: MediaDeviceInfo[];
 };
 
+/** Someone else in the call, as the UI needs them. */
+export type RemoteParticipant = {
+  /** Agora string account = their Supabase user id. */
+  uid: string;
+  /** Sending audio (false = muted or no mic). */
+  audioOn: boolean;
+  /** Their video, once subscribed (null = camera off). */
+  videoTrack: IRemoteVideoTrack | null;
+};
+
 export type CallSessionEvents = {
-  /** The other person joined the channel. */
-  onRemoteJoined: () => void;
-  /** The other person left the channel ("Quit") or dropped ("ServerTimeOut"). */
-  onRemoteLeft: (reason: string) => void;
-  /** The other person's video started or stopped. */
-  onRemoteVideoChanged: () => void;
+  /** Someone joined the channel. */
+  onRemoteJoined: (uid: string) => void;
+  /** Someone left the channel ("Quit") or dropped ("ServerTimeOut"). */
+  onRemoteLeft: (uid: string, reason: string) => void;
+  /** Anyone's tracks or mute state changed, or someone joined or left. */
+  onRemoteChanged: () => void;
   /** Our own camera track was created, closed or replaced. */
   onLocalVideoChanged: () => void;
   /** The camera failed or was unplugged; the call carries on without video. */
@@ -112,8 +123,6 @@ const CAMERA_CONFIG = { encoderConfig: "720p_2", optimizationMode: "motion" } as
  */
 export class CallSession {
   private client: IAgoraRTCClient | null = null;
-  private remoteAudio: IRemoteAudioTrack | null = null;
-  private remoteVideo: IRemoteVideoTrack | null = null;
   private camera: ICameraVideoTrack | null = null;
   private cameraId: string | null = null;
   private speakerId: string | null = null;
@@ -170,9 +179,18 @@ export class CallSession {
     return this.camera ? (this.camera.getMediaStreamTrack().getSettings().deviceId ?? this.cameraId) : this.cameraId;
   }
 
-  /** Whether the other person is currently in the channel. */
+  /** Whether anyone else is currently in the channel. */
   get remotePresent(): boolean {
     return (this.client?.remoteUsers.length ?? 0) > 0;
+  }
+
+  /** Everyone else in the channel, in join order. */
+  get remoteParticipants(): RemoteParticipant[] {
+    return (this.client?.remoteUsers ?? []).map((user) => ({
+      uid: String(user.uid),
+      audioOn: user.hasAudio,
+      videoTrack: user.hasVideo ? (user.videoTrack ?? null) : null,
+    }));
   }
 
   /** Our camera track while the camera is on (for local preview). */
@@ -180,9 +198,9 @@ export class CallSession {
     return this.camera;
   }
 
-  /** The other person's video while they're sending it. */
+  /** 1-on-1 calls: the other person's video while they're sending it. */
   get remoteVideoTrack(): IRemoteVideoTrack | null {
-    return this.remoteVideo;
+    return this.remoteParticipants.find((p) => p.videoTrack)?.videoTrack ?? null;
   }
 
   // --- Channel ----------------------------------------------------------------
@@ -199,36 +217,25 @@ export class CallSession {
       try {
         await client.subscribe(user, mediaType);
         if (this.closed) return;
-        if (mediaType === "audio") {
-          this.remoteAudio = user.audioTrack ?? null;
-          if (this.remoteAudio) {
-            if (this.speakerId) await this.remoteAudio.setPlaybackDevice(this.speakerId).catch(() => {});
-            this.remoteAudio.play();
-          }
-        } else {
-          this.remoteVideo = user.videoTrack ?? null;
-          this.events.onRemoteVideoChanged();
+        // Everyone's audio plays at once; the browser mixes it.
+        if (mediaType === "audio" && user.audioTrack) {
+          if (this.speakerId) await user.audioTrack.setPlaybackDevice(this.speakerId).catch(() => {});
+          user.audioTrack.play();
         }
+        this.events.onRemoteChanged();
       } catch {
         // A failed subscribe is retried by the next user-published event.
       }
     });
-    client.on("user-unpublished", (_user: IAgoraRTCRemoteUser, mediaType: "audio" | "video" | "datachannel") => {
-      if (mediaType === "video") {
-        this.remoteVideo = null;
-        this.events.onRemoteVideoChanged();
-      } else if (mediaType === "audio") {
-        this.remoteAudio = null;
-      }
+    // Muting (setEnabled(false)) and camera-off both arrive as unpublish.
+    client.on("user-unpublished", () => this.events.onRemoteChanged());
+    client.on("user-joined", (user: IAgoraRTCRemoteUser) => {
+      this.events.onRemoteJoined(String(user.uid));
+      this.events.onRemoteChanged();
     });
-    client.on("user-joined", () => this.events.onRemoteJoined());
-    client.on("user-left", (_user: IAgoraRTCRemoteUser, reason: string) => {
-      this.remoteAudio = null;
-      if (this.remoteVideo) {
-        this.remoteVideo = null;
-        this.events.onRemoteVideoChanged();
-      }
-      this.events.onRemoteLeft(reason);
+    client.on("user-left", (user: IAgoraRTCRemoteUser, reason: string) => {
+      this.events.onRemoteLeft(String(user.uid), reason);
+      this.events.onRemoteChanged();
     });
     client.on(
       "connection-state-change",
@@ -263,8 +270,9 @@ export class CallSession {
         "network",
       );
     }
-    // The peer may already be in the channel (they joined first).
-    if (client.remoteUsers.length > 0) this.events.onRemoteJoined();
+    // Others may already be in the channel (they joined first).
+    for (const user of client.remoteUsers) this.events.onRemoteJoined(String(user.uid));
+    this.events.onRemoteChanged();
   }
 
   // --- Controls ---------------------------------------------------------------
@@ -280,7 +288,9 @@ export class CallSession {
   /** Not every browser can route output (Safari/Firefox can't); throws then. */
   async setSpeaker(deviceId: string) {
     this.speakerId = deviceId;
-    if (this.remoteAudio) await this.remoteAudio.setPlaybackDevice(deviceId);
+    await Promise.all(
+      (this.client?.remoteUsers ?? []).map((u) => u.audioTrack?.setPlaybackDevice(deviceId)),
+    );
   }
 
   /**
@@ -321,7 +331,7 @@ export class CallSession {
 
   /** Resume playback after an autoplay block (call from a click handler). */
   resumePlayback() {
-    this.remoteAudio?.play();
+    for (const user of this.client?.remoteUsers ?? []) user.audioTrack?.play();
   }
 
   /** Leaves the channel and releases the microphone and camera. */
@@ -332,10 +342,10 @@ export class CallSession {
     this.AgoraRTC.onPlaybackDeviceChanged = undefined;
     this.AgoraRTC.onCameraChanged = undefined;
     this.AgoraRTC.onAutoplayFailed = undefined;
-    this.remoteAudio?.stop();
-    this.remoteVideo?.stop();
-    this.remoteAudio = null;
-    this.remoteVideo = null;
+    for (const user of this.client?.remoteUsers ?? []) {
+      user.audioTrack?.stop();
+      user.videoTrack?.stop();
+    }
     // Stop capture first so the devices are released even if leave() hangs.
     this.mic.stop();
     this.mic.close();
@@ -413,7 +423,9 @@ export class CallSession {
     this.AgoraRTC.onPlaybackDeviceChanged = async (info) => {
       if (info.state === "INACTIVE" && info.device.deviceId === this.speakerId) {
         this.speakerId = null;
-        await this.remoteAudio?.setPlaybackDevice("default").catch(() => {});
+        await Promise.all(
+          (this.client?.remoteUsers ?? []).map((u) => u.audioTrack?.setPlaybackDevice("default").catch(() => {})),
+        );
       }
       await refresh();
     };

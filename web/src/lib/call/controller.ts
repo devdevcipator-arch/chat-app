@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { profileName } from "@/lib/chat";
 import type { Database } from "@/lib/database.types";
 import type { ICameraVideoTrack, IRemoteVideoTrack } from "agora-rtc-sdk-ng";
-import { CallError, CallSession, type MediaDevices } from "@/lib/call/agora-client";
+import { CallError, CallSession, type MediaDevices, type RemoteParticipant } from "@/lib/call/agora-client";
 import { playTone } from "@/lib/call/ringtone";
 import {
   answerCall,
@@ -25,6 +25,7 @@ import {
   type CallRow,
   type CallSignal,
   type CallType,
+  type GroupCallInfo,
 } from "@/lib/call/types";
 
 // The call state machine (voice and video). Framework-free so its timers and async steps
@@ -32,6 +33,7 @@ import {
 //
 //   idle ─start→ starting ─row→ outgoing ─accepted→ connecting ─peer joined→ active
 //   idle ─incoming→ incoming ─accept→ connecting ─peer joined→ active
+//   idle ─startGroup→ group(joining) ─channel joined→ group(live)   (no ringing)
 //   any non-idle ─(hang up | declined | timeout | drop)→ ended ─2.5 s→ idle
 
 export type MediaState = {
@@ -119,6 +121,7 @@ export class CallController {
   /** The call row we are currently handling, if any. */
   private get currentRow(): CallRow | null {
     const c = this.call;
+    if (c.phase === "group") return c.call;
     return c.phase === "outgoing" || c.phase === "incoming" || c.phase === "connecting" || c.phase === "active"
       ? c.call
       : null;
@@ -140,6 +143,11 @@ export class CallController {
   /** The other person's video track (null while they aren't sending video). */
   get remoteVideoTrack(): IRemoteVideoTrack | null {
     return this.session?.remoteVideoTrack ?? null;
+  }
+
+  /** Everyone else in the room (group calls), with their tracks. */
+  get remoteParticipants(): RemoteParticipant[] {
+    return this.session?.remoteParticipants ?? [];
   }
 
   // --- User actions -----------------------------------------------------------
@@ -166,6 +174,7 @@ export class CallController {
       const messages = {
         "callee-busy": `${profileName(peer)} is on another call.`,
         "caller-busy": "You're already in a call (maybe in another tab).",
+        "call-full": "This call is full.",
         unavailable: "You can't call this chat.",
         error: "Couldn't start the call. Please try again.",
       } as const;
@@ -181,6 +190,51 @@ export class CallController {
 
     // 3. Join the media channel while it rings, so the answer connects instantly.
     void this.joinChannel(gen, peer.chatId);
+  };
+
+  /**
+   * Join the group's ongoing call, or start one. There's no ringing: other
+   * members see an "ongoing" pill and drop in. If a call is already running,
+   * its type wins (joining a video call from the voice button, or vice versa).
+   */
+  startGroup = async (group: GroupCallInfo, callType: CallType = "voice") => {
+    if (this.inCall || this.destroyed) return;
+    this.clearTimer("dismiss");
+    const gen = ++this.generation;
+    const joining = { phase: "group", group, status: "joining", reconnecting: false } as const;
+    this.set({ ...joining, call: null, callType }, INITIAL_MEDIA);
+
+    const session = await this.openSession(gen, callType === "video");
+    if (!session) return;
+
+    const result = await startCall(this.supabase, group.chatId, callType);
+    if (gen !== this.generation) {
+      if (result.ok) void endCall(this.supabase, result.call.id); // left while joining
+      return;
+    }
+    if (!result.ok) {
+      const messages = {
+        "callee-busy": "Someone in the call is busy.",
+        "caller-busy": "You're already in a call (maybe in another tab).",
+        "call-full": "This call is full.",
+        unavailable: "You can't call this group.",
+        error: "Couldn't join the call. Please try again.",
+      } as const;
+      this.finish(result.reason === "caller-busy" ? "busy" : "error", { message: messages[result.reason] });
+      return;
+    }
+
+    // Joined a call of the other type: match it (camera stays user-controlled).
+    const actualType = callTypeOf(result.call);
+    if (actualType === "voice" && callType === "video") await session.setCameraEnabled(false).catch(() => {});
+    if (gen !== this.generation) return;
+    this.set({ ...joining, call: result.call, callType: actualType });
+    this.syncVideo();
+    this.startConnectedTimers(gen); // heartbeat keeps our seat in the room
+
+    if (!(await this.joinChannel(gen, group.chatId))) return;
+    const c = this.call;
+    if (gen === this.generation && c.phase === "group") this.set({ ...c, status: "live" });
   };
 
   accept = async () => {
@@ -230,6 +284,9 @@ export class CallController {
       case "connecting":
       case "active":
         this.finish("hangup", { notifyServer: true });
+        break;
+      case "group":
+        this.finish("hangup", { notifyServer: true, message: "You left the call" });
         break;
       case "ended":
         this.dismiss();
@@ -348,7 +405,9 @@ export class CallController {
         else if (c.phase === "incoming") this.finish("answered-elsewhere");
         break;
       case "call:ended":
-        if (c.phase === "incoming") {
+        if (c.phase === "group") {
+          this.finish("hangup", { message: "Call ended" });
+        } else if (c.phase === "incoming") {
           this.finish("cancelled", { message: `Missed call from ${profileName(c.peer)}` });
         } else if (c.phase === "connecting" || c.phase === "active") {
           this.finish("hangup");
@@ -429,14 +488,16 @@ export class CallController {
         onRemoteJoined: () => {
           if (gen === this.generation) this.markActive();
         },
-        onRemoteLeft: (reason) => {
+        onRemoteLeft: (_uid, reason) => {
           if (gen !== this.generation) return;
+          // In a group room people come and go; only 1-on-1 calls end here.
           if (this.call.phase !== "active" && this.call.phase !== "connecting") return;
           this.finish(reason === "Quit" ? "hangup" : "connection-lost", { notifyServer: true });
         },
         onReconnecting: (reconnecting) => {
           const c = this.call;
-          if (gen === this.generation && c.phase === "active") this.set({ ...c, reconnecting });
+          if (gen !== this.generation) return;
+          if (c.phase === "active" || c.phase === "group") this.set({ ...c, reconnecting });
         },
         onDisconnected: () => {
           if (gen === this.generation) this.finish("connection-lost", { notifyServer: true });
@@ -447,7 +508,7 @@ export class CallController {
         onAutoplayBlocked: () => {
           if (gen === this.generation) this.setMedia({ autoplayBlocked: true });
         },
-        onRemoteVideoChanged: () => {
+        onRemoteChanged: () => {
           if (gen === this.generation) this.syncVideo();
         },
         onLocalVideoChanged: () => {
@@ -487,15 +548,18 @@ export class CallController {
     });
   }
 
-  private async joinChannel(gen: number, chatId: string) {
+  /** Joins the Agora channel; on failure ends the call. Returns whether it worked. */
+  private async joinChannel(gen: number, chatId: string): Promise<boolean> {
     const session = this.session;
-    if (!session) return;
+    if (!session) return false;
     try {
       await session.join(callChannelName(chatId));
+      return gen === this.generation;
     } catch (e) {
-      if (gen !== this.generation) return;
+      if (gen !== this.generation) return false;
       const message = e instanceof CallError ? e.message : "Couldn't connect the call.";
       this.finish("error", { notifyServer: true, message });
+      return false;
     }
   }
 
@@ -536,9 +600,20 @@ export class CallController {
       this.set({ phase: "idle" }, INITIAL_MEDIA);
       return;
     }
-    const callType = c.phase === "starting" ? c.callType : callTypeOf(c.call);
+    const callType = c.phase === "starting" || c.phase === "group" ? c.callType : callTypeOf(c.call);
+    const peer =
+      c.phase === "group"
+        ? { id: c.group.chatId, username: null, displayName: c.group.title, avatarUrl: null, chatId: c.group.chatId }
+        : c.peer;
     this.set(
-      { phase: "ended", peer: c.peer, callType, reason, message: message ?? defaultMessage(reason) },
+      {
+        phase: "ended",
+        peer,
+        callType,
+        group: c.phase === "group",
+        reason,
+        message: message ?? defaultMessage(reason),
+      },
       { cameraOn: false, remoteVideoOn: false, videoVersion: this.snapshot.media.videoVersion + 1 },
     );
     this.setTimer("dismiss", ENDED_BANNER_MS, () => this.set({ phase: "idle" }, INITIAL_MEDIA));
