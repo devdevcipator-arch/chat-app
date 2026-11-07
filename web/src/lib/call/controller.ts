@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { profileName } from "@/lib/chat";
 import type { Database } from "@/lib/database.types";
-import { CallError, VoiceSession, type AudioDevices } from "@/lib/call/agora-client";
+import type { ICameraVideoTrack, IRemoteVideoTrack } from "agora-rtc-sdk-ng";
+import { CallError, CallSession, type MediaDevices } from "@/lib/call/agora-client";
 import { playTone } from "@/lib/call/ringtone";
 import {
   answerCall,
@@ -17,14 +18,16 @@ import {
   HEARTBEAT_MS,
   RING_TIMEOUT_MS,
   callChannelName,
+  callTypeOf,
   type CallEndReason,
   type CallPeer,
   type CallPhase,
   type CallRow,
   type CallSignal,
+  type CallType,
 } from "@/lib/call/types";
 
-// The voice-call state machine. Framework-free so its timers and async steps
+// The call state machine (voice and video). Framework-free so its timers and async steps
 // never see stale React state; React reads it through useSyncExternalStore.
 //
 //   idle ─start→ starting ─row→ outgoing ─accepted→ connecting ─peer joined→ active
@@ -33,20 +36,37 @@ import {
 
 export type MediaState = {
   muted: boolean;
-  devices: AudioDevices;
+  devices: MediaDevices;
   microphoneId: string | null;
   speakerId: string | null;
   autoplayBlocked: boolean;
+  /** Our camera is capturing and published. */
+  cameraOn: boolean;
+  /** A camera on/off switch is in flight. */
+  cameraBusy: boolean;
+  cameraId: string | null;
+  /** Why video isn't available (permission denied, unplugged...). */
+  cameraError: string | null;
+  /** The other person is sending video. */
+  remoteVideoOn: boolean;
+  /** Bumped whenever a video track appears or goes away, to re-render players. */
+  videoVersion: number;
 };
 
 export type CallSnapshot = { call: CallPhase; media: MediaState };
 
 const INITIAL_MEDIA: MediaState = {
   muted: false,
-  devices: { microphones: [], speakers: [] },
+  devices: { microphones: [], speakers: [], cameras: [] },
   microphoneId: null,
   speakerId: null,
   autoplayBlocked: false,
+  cameraOn: false,
+  cameraBusy: false,
+  cameraId: null,
+  cameraError: null,
+  remoteVideoOn: false,
+  videoVersion: 0,
 };
 
 export const IDLE_SNAPSHOT: CallSnapshot = { call: { phase: "idle" }, media: INITIAL_MEDIA };
@@ -61,7 +81,7 @@ type FinishOptions = { notifyServer?: boolean; timeout?: boolean; message?: stri
 export class CallController {
   private snapshot: CallSnapshot = IDLE_SNAPSHOT;
   private listeners = new Set<() => void>();
-  private session: VoiceSession | null = null;
+  private session: CallSession | null = null;
   private stopTone: (() => void) | null = null;
   private timers = new Map<"ring" | "connect" | "heartbeat" | "dismiss" | "incoming", number>();
   /** Bumped whenever a call finishes, so in-flight async steps can bail out. */
@@ -112,20 +132,31 @@ export class CallController {
     this.accessToken = token;
   }
 
+  /** Our camera track for the local preview (null while the camera is off). */
+  get localVideoTrack(): ICameraVideoTrack | null {
+    return this.session?.localVideoTrack ?? null;
+  }
+
+  /** The other person's video track (null while they aren't sending video). */
+  get remoteVideoTrack(): IRemoteVideoTrack | null {
+    return this.session?.remoteVideoTrack ?? null;
+  }
+
   // --- User actions -----------------------------------------------------------
 
-  start = async (peer: CallPeer) => {
+  start = async (peer: CallPeer, callType: CallType = "voice") => {
     if (this.inCall || this.destroyed) return;
     this.clearTimer("dismiss");
     const gen = ++this.generation;
-    this.set({ phase: "starting", peer }, INITIAL_MEDIA);
+    this.set({ phase: "starting", peer, callType }, INITIAL_MEDIA);
 
-    // 1. Microphone first: fail fast (and never ring someone) without one.
-    const session = await this.openSession(gen);
+    // 1. Devices first: fail fast (and never ring someone) without a mic.
+    //    A missing camera doesn't stop a video call; it starts without video.
+    const session = await this.openSession(gen, callType === "video");
     if (!session) return;
 
     // 2. Create the call row (server checks membership and busy state).
-    const result = await startCall(this.supabase, peer.chatId);
+    const result = await startCall(this.supabase, peer.chatId, callType);
     if (gen !== this.generation) {
       // Hung up while we were waiting.
       if (result.ok) void endCall(this.supabase, result.call.id);
@@ -160,7 +191,7 @@ export class CallController {
     this.clearTimer("incoming");
     this.set({ phase: "connecting", call: c.call, peer: c.peer }, INITIAL_MEDIA);
 
-    const session = await this.openSession(gen, () => {
+    const session = await this.openSession(gen, callTypeOf(c.call) === "video", () => {
       // Decline so the caller isn't left ringing.
       void endCall(this.supabase, c.call.id);
     });
@@ -211,6 +242,39 @@ export class CallController {
     this.clearTimer("dismiss");
     this.set({ phase: "idle" }, INITIAL_MEDIA);
   };
+
+  /** Camera on/off mid-call. Turning it off releases the device entirely. */
+  toggleCamera = async () => {
+    const session = this.session;
+    if (!session || this.snapshot.media.cameraBusy) return;
+    const enable = !this.snapshot.media.cameraOn;
+    this.setMedia({ cameraBusy: true, cameraError: null });
+    try {
+      await session.setCameraEnabled(enable);
+    } catch (e) {
+      if (this.session === session) {
+        this.setMedia({ cameraError: e instanceof CallError ? e.message : "Couldn't start your camera." });
+      }
+    } finally {
+      if (this.session === session) this.syncVideo({ cameraBusy: false });
+    }
+  };
+
+  setCamera = async (deviceId: string) => {
+    const session = this.session;
+    if (!session) return;
+    const previous = this.snapshot.media.cameraId;
+    this.setMedia({ cameraId: deviceId });
+    try {
+      await session.setCamera(deviceId);
+    } catch {
+      if (this.session === session) {
+        this.setMedia({ cameraId: previous, cameraError: "Couldn't switch to that camera." });
+      }
+    }
+  };
+
+  dismissCameraError = () => this.setMedia({ cameraError: null });
 
   toggleMute = async () => {
     if (!this.session) return;
@@ -358,10 +422,10 @@ export class CallController {
     });
   }
 
-  /** Opens the mic. On failure finishes the call and returns null. */
-  private async openSession(gen: number, onMicFailure?: () => void): Promise<VoiceSession | null> {
+  /** Opens the mic (and camera). On mic failure finishes the call and returns null. */
+  private async openSession(gen: number, video: boolean, onMicFailure?: () => void): Promise<CallSession | null> {
     try {
-      const session = await VoiceSession.create({
+      const { session, cameraError } = await CallSession.create({
         onRemoteJoined: () => {
           if (gen === this.generation) this.markActive();
         },
@@ -383,12 +447,22 @@ export class CallController {
         onAutoplayBlocked: () => {
           if (gen === this.generation) this.setMedia({ autoplayBlocked: true });
         },
-      });
+        onRemoteVideoChanged: () => {
+          if (gen === this.generation) this.syncVideo();
+        },
+        onLocalVideoChanged: () => {
+          if (gen === this.generation) this.syncVideo();
+        },
+        onCameraError: (message) => {
+          if (gen === this.generation) this.syncVideo({ cameraError: message });
+        },
+      }, { video });
       if (gen !== this.generation) {
-        void session.leave();
+        void session.leave(); // releases mic + camera
         return null;
       }
       this.session = session;
+      this.syncVideo({ cameraError });
       const devices = await session.listDevices();
       if (gen === this.generation) this.setMedia({ devices, microphoneId: session.microphoneId || null });
       return session;
@@ -399,6 +473,18 @@ export class CallController {
       this.finish("mic-error", { message });
       return null;
     }
+  }
+
+  /** Copies the session's video state into the snapshot. */
+  private syncVideo(extra: Partial<MediaState> = {}) {
+    const session = this.session;
+    this.setMedia({
+      cameraOn: !!session?.localVideoTrack,
+      cameraId: session?.currentCameraId ?? this.snapshot.media.cameraId,
+      remoteVideoOn: !!session?.remoteVideoTrack,
+      videoVersion: this.snapshot.media.videoVersion + 1,
+      ...extra,
+    });
   }
 
   private async joinChannel(gen: number, chatId: string) {
@@ -450,7 +536,11 @@ export class CallController {
       this.set({ phase: "idle" }, INITIAL_MEDIA);
       return;
     }
-    this.set({ phase: "ended", peer: c.peer, reason, message: message ?? defaultMessage(reason) });
+    const callType = c.phase === "starting" ? c.callType : callTypeOf(c.call);
+    this.set(
+      { phase: "ended", peer: c.peer, callType, reason, message: message ?? defaultMessage(reason) },
+      { cameraOn: false, remoteVideoOn: false, videoVersion: this.snapshot.media.videoVersion + 1 },
+    );
     this.setTimer("dismiss", ENDED_BANNER_MS, () => this.set({ phase: "idle" }, INITIAL_MEDIA));
   }
 

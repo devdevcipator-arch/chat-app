@@ -72,3 +72,29 @@ export function ExpandIcon({ className = "size-5" }: IconProps) {
     </svg>
   );
 }
+
+export function VideoIcon({ className = "size-5" }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="2.5" y="6" width="13" height="12" rx="2.5" />
+      <path d="M15.5 10.5l6-3.5v10l-6-3.5" />
+    </svg>
+  );
+}
+
+export function VideoOffIcon({ className = "size-5" }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M10.5 6h2.5a2.5 2.5 0 0 1 2.5 2.5v2M15.5 13.5V15.5A2.5 2.5 0 0 1 13 18H5a2.5 2.5 0 0 1-2.5-2.5v-7A2.5 2.5 0 0 1 5 6M15.5 10.5l6-3.5v10l-4-2.3M3 3l18 18" />
+    </svg>
+  );
+}
+
+/** Swap the main and picture-in-picture videos. */
+export function FlipIcon({ className = "size-5" }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M7 4L3 8l4 4M3 8h13a5 5 0 0 1 0 10h-2M17 20l4-4-4-4M21 16H8" />
+    </svg>
+  );
+}

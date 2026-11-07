@@ -1,12 +1,16 @@
 import type { Database } from "@/lib/database.types";
 import type { PublicProfile } from "@/lib/chat";
 
-// Shared (client + server) voice-call types.
+// Shared (client + server) call types (voice and video).
 
 export type CallRow = Database["public"]["Tables"]["calls"]["Row"];
 
 export const CALL_STATUSES = ["ringing", "accepted", "declined", "cancelled", "missed", "ended"] as const;
 export type CallStatus = (typeof CALL_STATUSES)[number];
+
+export type CallType = "voice" | "video";
+export const asCallType = (value: string | null | undefined): CallType => (value === "video" ? "video" : "voice");
+export const callTypeOf = (call: Pick<CallRow, "call_type">) => asCallType(call.call_type);
 
 export const isCallStatus = (value: string): value is CallStatus =>
   (CALL_STATUSES as readonly string[]).includes(value);
@@ -37,12 +41,12 @@ export type CallEndReason =
 export type CallPhase =
   | { phase: "idle" }
   /** Opening the mic and creating the call row. */
-  | { phase: "starting"; peer: CallPeer }
+  | { phase: "starting"; peer: CallPeer; callType: CallType }
   | { phase: "outgoing"; call: CallRow; peer: CallPeer }
   | { phase: "incoming"; call: CallRow; peer: CallPeer }
   | { phase: "connecting"; call: CallRow; peer: CallPeer }
   | { phase: "active"; call: CallRow; peer: CallPeer; connectedAt: number; reconnecting: boolean }
-  | { phase: "ended"; peer: CallPeer; reason: CallEndReason; message: string };
+  | { phase: "ended"; peer: CallPeer; callType: CallType; reason: CallEndReason; message: string };
 
 /** Agora channel names are `call_<chatId>`. */
 export const callChannelName = (chatId: string) => `call_${chatId}`;

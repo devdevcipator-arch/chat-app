@@ -1,17 +1,23 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { Avatar } from "@/components/avatar";
 import type { CallController, MediaState } from "@/lib/call/controller";
-import type { CallPhase } from "@/lib/call/types";
 import { profileName } from "@/lib/chat";
+import {
+  DevicePicker,
+  RoundButton,
+  phaseCallType,
+  statusText,
+  useCallClock,
+  type ShownPhase,
+} from "./call-ui";
 import { useCall } from "./call-provider";
 import { ExpandIcon, MicIcon, MicOffIcon, MinimizeIcon, PhoneDownIcon, SettingsIcon } from "./icons";
+import { VideoCallScreen, VideoPill } from "./video-call";
 
-type ShownPhase = Exclude<CallPhase, { phase: "idle" } | { phase: "incoming" }>;
-
-/** Outgoing / connecting / active / ended call screen, minimizable to a pill. */
+/** Outgoing / connecting / active / ended call screen, minimizable. */
 export function CallOverlay() {
   const { call, media, controller } = useCall();
   const [minimizedFor, setMinimizedFor] = useState<string | null>(null);
@@ -20,6 +26,10 @@ export function CallOverlay() {
   // Minimizing applies to one call; a new call opens full screen again.
   const callKey = shown ? ("call" in shown ? shown.call.id : `${shown.phase}:${shown.peer.id}`) : null;
   const minimized = !!callKey && minimizedFor === callKey;
+  // The "call ended" card is the same for both kinds of call.
+  const video = !!shown && shown.phase !== "ended" && phaseCallType(shown) === "video";
+  const minimize = () => callKey && setMinimizedFor(callKey);
+  const expand = () => setMinimizedFor(null);
 
   // Escape minimizes rather than hanging up.
   useEffect(() => {
@@ -31,63 +41,31 @@ export function CallOverlay() {
     return () => window.removeEventListener("keydown", onKey);
   }, [callKey, minimized]);
 
+  if (!shown || !controller) return <AnimatePresence />;
+  const props = { call: shown, media, controller };
+
   return (
     <AnimatePresence>
-      {shown && controller && !minimized && (
-        <FullScreen
-          key="full"
-          call={shown}
-          media={media}
-          controller={controller}
-          onMinimize={() => callKey && setMinimizedFor(callKey)}
-        />
-      )}
-      {shown && controller && minimized && (
-        <Pill key="pill" call={shown} media={media} controller={controller} onExpand={() => setMinimizedFor(null)} />
-      )}
+      {!minimized &&
+        (video ? (
+          <VideoCallScreen key="video-full" {...props} onMinimize={minimize} />
+        ) : (
+          <FullScreen key="full" {...props} onMinimize={minimize} />
+        ))}
+      {minimized &&
+        (video ? (
+          <VideoPill key="video-pill" {...props} onExpand={expand} />
+        ) : (
+          <Pill key="pill" {...props} onExpand={expand} />
+        ))}
     </AnimatePresence>
   );
-}
-
-function statusText(call: ShownPhase, elapsed: string) {
-  switch (call.phase) {
-    case "starting":
-      return "Starting…";
-    case "outgoing":
-      return "Ringing…";
-    case "connecting":
-      return "Connecting…";
-    case "active":
-      return call.reconnecting ? "Reconnecting…" : elapsed;
-    case "ended":
-      return call.message;
-  }
-}
-
-function useElapsed(since: number | null) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (since === null) return;
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, [since]);
-  return since === null ? 0 : Math.max(0, now - since);
-}
-
-/** 83_000 → "01:23", 3_723_000 → "1:02:03". */
-function formatDuration(ms: number) {
-  const total = Math.floor(ms / 1000);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
 
 type ViewProps = { call: ShownPhase; media: MediaState; controller: CallController };
 
 function FullScreen({ call, media, controller, onMinimize }: ViewProps & { onMinimize: () => void }) {
-  const elapsed = formatDuration(useElapsed(call.phase === "active" ? call.connectedAt : null));
+  const elapsed = useCallClock(call);
   const name = profileName(call.peer);
   const ringing = call.phase === "starting" || call.phase === "outgoing";
   const live = call.phase === "connecting" || call.phase === "active";
@@ -166,7 +144,7 @@ function FullScreen({ call, media, controller, onMinimize }: ViewProps & { onMin
 
       <div className="relative shrink-0 px-6 pt-4 pb-[max(2.5rem,env(safe-area-inset-bottom))]">
         <AnimatePresence>
-          {showDevices && !ended && <DevicePicker media={media} controller={controller} />}
+          {showDevices && !ended && <DevicePicker media={media} controller={controller} video={false} />}
         </AnimatePresence>
 
         <div className="flex items-center justify-center gap-6">
@@ -213,95 +191,8 @@ function FullScreen({ call, media, controller, onMinimize }: ViewProps & { onMin
   );
 }
 
-function RoundButton({
-  label,
-  active,
-  disabled,
-  onClick,
-  children,
-}: {
-  label: string;
-  active: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      aria-pressed={active}
-      title={label}
-      className={`flex size-14 items-center justify-center rounded-full transition active:scale-95 disabled:opacity-40 ${
-        active ? "bg-white text-zinc-900" : "bg-white/15 text-white hover:bg-white/25"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function DevicePicker({ media, controller }: { media: MediaState; controller: CallController }) {
-  const micId = useId();
-  const speakerId = useId();
-  // Output selection needs setSinkId (Chromium; not Safari / most Firefox).
-  const canPickSpeaker =
-    typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
-  const { microphones, speakers } = media.devices;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 8 }}
-      className="mx-auto mb-6 w-full max-w-sm space-y-3 rounded-2xl bg-white/10 p-4 text-left text-sm backdrop-blur"
-    >
-      <label htmlFor={micId} className="block space-y-1">
-        <span className="text-white/60">Microphone</span>
-        {microphones.length > 0 ? (
-          <select
-            id={micId}
-            value={media.microphoneId ?? ""}
-            onChange={(e) => void controller.setMicrophone(e.target.value)}
-            className="w-full rounded-lg bg-zinc-800 px-3 py-2 text-white outline-none focus:ring-2 focus:ring-indigo-400"
-          >
-            {media.microphoneId === null && <option value="">Default</option>}
-            {microphones.map((d, i) => (
-              <option key={d.deviceId || i} value={d.deviceId}>
-                {d.label || `Microphone ${i + 1}`}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <p className="text-white/50">No microphones detected.</p>
-        )}
-      </label>
-      {canPickSpeaker && speakers.length > 0 && (
-        <label htmlFor={speakerId} className="block space-y-1">
-          <span className="text-white/60">Speaker</span>
-          <select
-            id={speakerId}
-            value={media.speakerId ?? "default"}
-            onChange={(e) => void controller.setSpeaker(e.target.value)}
-            className="w-full rounded-lg bg-zinc-800 px-3 py-2 text-white outline-none focus:ring-2 focus:ring-indigo-400"
-          >
-            {!speakers.some((d) => d.deviceId === "default") && <option value="default">Default</option>}
-            {speakers.map((d, i) => (
-              <option key={d.deviceId || i} value={d.deviceId}>
-                {d.label || `Speaker ${i + 1}`}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-    </motion.div>
-  );
-}
-
 function Pill({ call, media, controller, onExpand }: ViewProps & { onExpand: () => void }) {
-  const elapsed = formatDuration(useElapsed(call.phase === "active" ? call.connectedAt : null));
+  const elapsed = useCallClock(call);
   const ended = call.phase === "ended";
   const live = call.phase === "connecting" || call.phase === "active";
 

@@ -3,9 +3,10 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef } from "react";
 import { Avatar } from "@/components/avatar";
+import { callTypeOf } from "@/lib/call/types";
 import { profileName } from "@/lib/chat";
 import { useCall } from "./call-provider";
-import { PhoneDownIcon, PhoneIcon } from "./icons";
+import { PhoneDownIcon, PhoneIcon, VideoIcon } from "./icons";
 
 /** Ringing banner with Accept / Decline. */
 export function IncomingCall() {
@@ -14,6 +15,8 @@ export function IncomingCall() {
   const acceptButton = useRef<HTMLButtonElement>(null);
 
   const incomingId = incoming?.call.id ?? null;
+  const video = !!incoming && callTypeOf(incoming.call) === "video";
+  const kind = video ? "video call" : "voice call";
 
   // Focus Accept so keyboard users can answer straight away.
   useEffect(() => {
@@ -27,7 +30,7 @@ export function IncomingCall() {
           key={incoming.call.id}
           role="alertdialog"
           aria-live="assertive"
-          aria-label={`Incoming voice call from ${profileName(incoming.peer)}`}
+          aria-label={`Incoming ${kind} from ${profileName(incoming.peer)}`}
           initial={{ opacity: 0, y: -24, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -24, scale: 0.96 }}
@@ -41,7 +44,10 @@ export function IncomingCall() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate font-semibold">{profileName(incoming.peer)}</p>
-              <p className="text-sm text-zinc-500">Incoming voice call…</p>
+              <p className="flex items-center gap-1.5 text-sm text-zinc-500">
+                {video ? <VideoIcon className="size-4 shrink-0" /> : <PhoneIcon className="size-4 shrink-0" />}
+                {video ? "Incoming video call…" : "Incoming voice call…"}
+              </p>
             </div>
             <button
               type="button"
@@ -56,11 +62,15 @@ export function IncomingCall() {
               ref={acceptButton}
               type="button"
               onClick={() => void controller.accept()}
-              aria-label="Accept call"
+              aria-label={video ? "Accept video call" : "Accept call"}
               title="Accept"
               className="flex size-12 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 transition hover:bg-emerald-500 active:scale-95"
             >
-              <PhoneIcon className="size-5 animate-[wiggle_1s_ease-in-out_infinite]" />
+              {video ? (
+                <VideoIcon className="size-5 animate-[wiggle_1s_ease-in-out_infinite]" />
+              ) : (
+                <PhoneIcon className="size-5 animate-[wiggle_1s_ease-in-out_infinite]" />
+              )}
             </button>
           </div>
         </motion.div>

@@ -17,6 +17,7 @@ export type Database = {
       calls: {
         Row: {
           answered_at: string | null
+          call_type: string
           callee_id: string
           caller_id: string
           chat_id: string
@@ -29,6 +30,7 @@ export type Database = {
         }
         Insert: {
           answered_at?: string | null
+          call_type?: string
           callee_id: string
           caller_id: string
           chat_id: string
@@ -41,6 +43,7 @@ export type Database = {
         }
         Update: {
           answered_at?: string | null
+          call_type?: string
           callee_id?: string
           caller_id?: string
           chat_id?: string
@@ -271,6 +274,7 @@ export type Database = {
         Args: { p_accept: boolean; p_call_id: string }
         Returns: {
           answered_at: string | null
+          call_type: string
           callee_id: string
           caller_id: string
           chat_id: string
@@ -299,6 +303,7 @@ export type Database = {
         Args: { p_call_id: string; p_timeout?: boolean }
         Returns: {
           answered_at: string | null
+          call_type: string
           callee_id: string
           caller_id: string
           chat_id: string
@@ -372,9 +377,10 @@ export type Database = {
         Returns: undefined
       }
       start_call: {
-        Args: { p_chat_id: string }
+        Args: { p_call_type?: string; p_chat_id: string }
         Returns: {
           answered_at: string | null
+          call_type: string
           callee_id: string
           caller_id: string
           chat_id: string

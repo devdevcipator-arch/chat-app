@@ -341,7 +341,12 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
             Reconnecting…
           </span>
         )}
-        {!group && <CallButton peer={other ? { ...other, chatId } : null} />}
+        {!group && (
+          <>
+            <CallButton peer={other ? { ...other, chatId } : null} type="video" />
+            <CallButton peer={other ? { ...other, chatId } : null} type="voice" />
+          </>
+        )}
         <ChatMenu
           chatId={chatId}
           type={details.type}

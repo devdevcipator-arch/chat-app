@@ -1,6 +1,6 @@
 import type { RealtimePostgresChangesPayload, SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
-import { isCallStatus, type CallRow, type CallSignal } from "@/lib/call/types";
+import { isCallStatus, type CallRow, type CallSignal, type CallType } from "@/lib/call/types";
 
 // Call signaling over Supabase: RPCs change state (server-validated) and
 // postgres_changes on `calls` deliver every change to both parties.
@@ -55,8 +55,8 @@ export type StartCallResult =
   | { ok: true; call: CallRow }
   | { ok: false; reason: "callee-busy" | "caller-busy" | "unavailable" | "error" };
 
-export async function startCall(supabase: Client, chatId: string): Promise<StartCallResult> {
-  const { data, error } = await supabase.rpc("start_call", { p_chat_id: chatId });
+export async function startCall(supabase: Client, chatId: string, callType: CallType): Promise<StartCallResult> {
+  const { data, error } = await supabase.rpc("start_call", { p_chat_id: chatId, p_call_type: callType });
   if (!error && data) return { ok: true, call: data };
   if (error?.message === "callee busy") return { ok: false, reason: "callee-busy" };
   if (error?.message === "caller busy") return { ok: false, reason: "caller-busy" };
