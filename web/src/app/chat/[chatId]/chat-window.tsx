@@ -16,13 +16,17 @@ import { Avatar } from "@/components/avatar";
 import {
   MESSAGE_MAX,
   MESSAGE_PAGE_SIZE,
+  chatName,
   formatMessageTime,
   mergeMessages,
   profileName,
+  type ChatDetails,
   type ChatMessage,
   type MessageRow,
   type PublicProfile,
 } from "@/lib/chat";
+import { fetchChatDetails } from "@/lib/chat-actions";
+import { onChatEvent } from "@/lib/chat-events";
 import {
   ACCEPTED_FILE_INPUT,
   ACCEPTED_IMAGE_INPUTS,
@@ -34,12 +38,15 @@ import {
 import { UploadError, compressImage, requestUploadUrl, uploadToR2 } from "@/lib/media-client";
 import { createClient } from "@/lib/supabase/client";
 import { CallButton } from "../call/call-button";
+import { ChatMenu } from "../chat-menu";
+import { GroupInfo } from "./group-info";
 import { AudioMessage, ImageMessage, Lightbox } from "./media";
 
 type Props = {
   chatId: string;
   meId: string;
   other: PublicProfile | null;
+  details: ChatDetails;
   initialMessages: ChatMessage[];
 };
 
@@ -54,9 +61,13 @@ type PreparedMedia = {
 const errorText = (e: unknown) =>
   e instanceof UploadError ? e.message : "Something went wrong. Please try again.";
 
-export function ChatWindow({ chatId, meId, other, initialMessages }: Props) {
+export function ChatWindow({ chatId, meId, other, details: initialDetails, initialMessages }: Props) {
   const [supabase] = useState(createClient);
   const [messages, setMessages] = useState(initialMessages);
+  const [details, setDetails] = useState(initialDetails);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const closeInfo = useCallback(() => setInfoOpen(false), []);
+  const group = details.type === "group";
   const [connected, setConnected] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -87,12 +98,22 @@ export function ChatWindow({ chatId, meId, other, initialMessages }: Props) {
       if (data) setMessages((prev) => mergeMessages(prev, data));
     };
 
+    const reloadDetails = async () => {
+      const fresh = await fetchChatDetails(supabase, chatId);
+      if (fresh) setDetails(fresh);
+    };
+
     const channel = supabase
       .channel(`chat:${chatId}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages", filter: `chat_id=eq.${chatId}` },
-        (payload) => setMessages((prev) => mergeMessages(prev, [payload.new as MessageRow])),
+        (payload) => {
+          const message = payload.new as MessageRow;
+          setMessages((prev) => mergeMessages(prev, [message]));
+          // Group system messages announce renames and membership changes.
+          if (message.message_type === "system") void reloadDetails();
+        },
       )
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
@@ -107,6 +128,23 @@ export function ChatWindow({ chatId, meId, other, initialMessages }: Props) {
       void supabase.removeChannel(channel);
     };
   }, [supabase, chatId]);
+
+  // Actions taken from the sidebar menu or the group info panel.
+  useEffect(
+    () =>
+      onChatEvent((event) => {
+        if (event.chatId !== chatId) return;
+        if (event.type === "muted") setDetails((d) => ({ ...d, isMuted: event.muted }));
+        else if (event.type === "cleared") setMessages([]);
+        else if (event.type === "updated") {
+          void fetchChatDetails(supabase, chatId).then((fresh) => fresh && setDetails(fresh));
+        }
+      }),
+    [supabase, chatId],
+  );
+
+  /** Sender names for group bubbles; people who left show as "Former member". */
+  const memberNames = new Map(details.members.map((m) => [m.id, profileName(m)]));
 
   // Keep the view pinned to the newest message unless the user scrolled up.
   useLayoutEffect(() => {
@@ -255,7 +293,7 @@ export function ChatWindow({ chatId, meId, other, initialMessages }: Props) {
     }
   }
 
-  const name = profileName(other);
+  const name = chatName({ type: details.type, title: details.title, other });
 
   return (
     <section className="flex min-w-0 flex-1 flex-col" aria-label={`Conversation with ${name}`}>
@@ -269,17 +307,50 @@ export function ChatWindow({ chatId, meId, other, initialMessages }: Props) {
             <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </Link>
-        <Avatar name={name} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-medium">{name}</p>
-          {other?.username && <p className="truncate text-xs text-zinc-500">@{other.username}</p>}
-        </div>
+        {group ? (
+          <button
+            type="button"
+            onClick={() => setInfoOpen(true)}
+            aria-label={`Group info for ${name}`}
+            className="-my-1 flex min-w-0 flex-1 items-center gap-3 rounded-lg py-1 pr-2 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800/70"
+          >
+            <Avatar name={name} group />
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium">{name}</p>
+              <p className="truncate text-xs text-zinc-500">
+                {details.members.length} members · tap for group info
+              </p>
+            </div>
+          </button>
+        ) : (
+          <>
+            <Avatar name={name} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium">{name}</p>
+              {other?.username && <p className="truncate text-xs text-zinc-500">@{other.username}</p>}
+            </div>
+          </>
+        )}
+        {details.isMuted && (
+          <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800" title="Notifications muted">
+            Muted
+          </span>
+        )}
         {!connected && (
           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
             Reconnecting…
           </span>
         )}
-        <CallButton peer={other ? { ...other, chatId } : null} />
+        {!group && <CallButton peer={other ? { ...other, chatId } : null} />}
+        <ChatMenu
+          chatId={chatId}
+          type={details.type}
+          name={name}
+          isMuted={details.isMuted}
+          isAdmin={details.myRole === "admin"}
+          extraItems={group ? [{ label: "Group info", onSelect: () => setInfoOpen(true) }] : []}
+          triggerClassName="size-10"
+        />
       </header>
 
       <div
@@ -295,7 +366,7 @@ export function ChatWindow({ chatId, meId, other, initialMessages }: Props) {
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center text-center text-sm text-zinc-500">
             <p>
-              This is the start of your conversation with {name}.
+              {group ? `This is the start of "${name}".` : `This is the start of your conversation with ${name}.`}
               <br />
               Say hi 👋
             </p>
@@ -308,7 +379,12 @@ export function ChatWindow({ chatId, meId, other, initialMessages }: Props) {
                   key={message.id}
                   message={message}
                   mine={message.sender_id === meId}
-                  grouped={messages[i - 1]?.sender_id === message.sender_id}
+                  grouped={messages[i - 1]?.sender_id === message.sender_id && messages[i - 1]?.message_type !== "system"}
+                  senderLabel={
+                    group && message.sender_id !== meId
+                      ? (message.sender_id && memberNames.get(message.sender_id)) || "Former member"
+                      : null
+                  }
                   onRetry={() => retry(message)}
                   onOpenImage={setLightbox}
                 />
@@ -339,6 +415,7 @@ export function ChatWindow({ chatId, meId, other, initialMessages }: Props) {
 
       <Composer onSend={handleSendText} onAttach={(file) => void handleAttach(file)} />
       <Lightbox src={lightbox} onClose={closeLightbox} />
+      {group && <GroupInfo open={infoOpen} onClose={closeInfo} meId={meId} details={details} />}
     </section>
   );
 }
@@ -347,12 +424,15 @@ function MessageBubble({
   message,
   mine,
   grouped,
+  senderLabel,
   onRetry,
   onOpenImage,
 }: {
   message: ChatMessage;
   mine: boolean;
   grouped: boolean;
+  /** Shown above the first bubble of a run in group chats. */
+  senderLabel: string | null;
   onRetry: () => void;
   onOpenImage: (src: string) => void;
 }) {
@@ -400,6 +480,9 @@ function MessageBubble({
       className={`flex ${mine ? "justify-end" : "justify-start"} ${grouped ? "" : "mt-2"}`}
     >
       <div className={`flex max-w-[80%] flex-col md:max-w-[65%] ${mine ? "items-end" : "items-start"}`}>
+        {senderLabel && !grouped && (
+          <span className="mb-0.5 px-1 text-xs font-medium text-indigo-600 dark:text-indigo-400">{senderLabel}</span>
+        )}
         {body}
         <div className="mt-0.5 flex items-center gap-1.5 px-1 text-[11px] text-zinc-500">
           {message.status === "failed" ? (

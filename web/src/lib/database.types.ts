@@ -85,17 +85,32 @@ export type Database = {
       chat_participants: {
         Row: {
           chat_id: string
+          cleared_at: string | null
+          hidden_at: string | null
+          is_muted: boolean
           joined_at: string
+          last_read_at: string | null
+          role: string
           user_id: string
         }
         Insert: {
           chat_id: string
+          cleared_at?: string | null
+          hidden_at?: string | null
+          is_muted?: boolean
           joined_at?: string
+          last_read_at?: string | null
+          role?: string
           user_id: string
         }
         Update: {
           chat_id?: string
+          cleared_at?: string | null
+          hidden_at?: string | null
+          is_muted?: boolean
           joined_at?: string
+          last_read_at?: string | null
+          role?: string
           user_id?: string
         }
         Relationships: [
@@ -117,21 +132,38 @@ export type Database = {
       }
       chats: {
         Row: {
+          avatar_url: string | null
           created_at: string
+          created_by: string | null
           id: string
+          title: string | null
           type: string
         }
         Insert: {
+          avatar_url?: string | null
           created_at?: string
+          created_by?: string | null
           id?: string
+          title?: string | null
           type: string
         }
         Update: {
+          avatar_url?: string | null
           created_at?: string
+          created_by?: string | null
           id?: string
+          title?: string | null
           type?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "chats_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       messages: {
         Row: {
@@ -231,20 +263,59 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      add_group_members: {
+        Args: { p_chat_id: string; p_member_ids: string[] }
+        Returns: number
+      }
       answer_call: {
         Args: { p_accept: boolean; p_call_id: string }
-        Returns: Database["public"]["Tables"]["calls"]["Row"]
+        Returns: {
+          answered_at: string | null
+          callee_id: string
+          caller_id: string
+          chat_id: string
+          created_at: string
+          ended_at: string | null
+          ended_by: string | null
+          id: string
+          last_seen_at: string
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "calls"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
+      clear_chat: { Args: { p_chat_id: string }; Returns: undefined }
+      create_direct_chat: { Args: { p_other_user: string }; Returns: string }
+      create_group_chat: {
+        Args: { p_member_ids: string[]; p_title: string }
+        Returns: string
+      }
+      delete_group: { Args: { p_chat_id: string }; Returns: undefined }
       end_call: {
         Args: { p_call_id: string; p_timeout?: boolean }
-        Returns: Database["public"]["Tables"]["calls"]["Row"]
+        Returns: {
+          answered_at: string | null
+          callee_id: string
+          caller_id: string
+          chat_id: string
+          created_at: string
+          ended_at: string | null
+          ended_by: string | null
+          id: string
+          last_seen_at: string
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "calls"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
-      heartbeat_call: { Args: { p_call_id: string }; Returns: boolean }
-      start_call: {
-        Args: { p_chat_id: string }
-        Returns: Database["public"]["Tables"]["calls"]["Row"]
-      }
-      create_direct_chat: { Args: { p_other_user: string }; Returns: string }
       find_profile_by_username: {
         Args: { p_username: string }
         Returns: {
@@ -254,21 +325,76 @@ export type Database = {
           username: string
         }[]
       }
+      get_chat_membership: {
+        Args: { p_chat_id: string }
+        Returns: {
+          is_muted: boolean
+          role: string
+        }[]
+      }
+      heartbeat_call: { Args: { p_call_id: string }; Returns: boolean }
+      hide_chat: { Args: { p_chat_id: string }; Returns: undefined }
+      leave_group: { Args: { p_chat_id: string }; Returns: undefined }
       list_my_chats: {
         Args: never
         Returns: {
+          avatar_url: string
           chat_created_at: string
           chat_id: string
           chat_type: string
+          is_muted: boolean
           last_message_at: string
           last_message_content: string
           last_message_sender_id: string
+          last_message_sender_name: string
           last_message_type: string
+          member_count: number
+          my_role: string
           other_avatar_url: string
           other_display_name: string
           other_user_id: string
           other_username: string
+          title: string
+          unread_count: number
         }[]
+      }
+      mark_chat_read: { Args: { p_chat_id: string }; Returns: undefined }
+      remove_group_member: {
+        Args: { p_chat_id: string; p_user_id: string }
+        Returns: undefined
+      }
+      set_chat_muted: {
+        Args: { p_chat_id: string; p_muted: boolean }
+        Returns: undefined
+      }
+      set_group_role: {
+        Args: { p_chat_id: string; p_role: string; p_user_id: string }
+        Returns: undefined
+      }
+      start_call: {
+        Args: { p_chat_id: string }
+        Returns: {
+          answered_at: string | null
+          callee_id: string
+          caller_id: string
+          chat_id: string
+          created_at: string
+          ended_at: string | null
+          ended_by: string | null
+          id: string
+          last_seen_at: string
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "calls"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      update_group: {
+        Args: { p_chat_id: string; p_title: string }
+        Returns: undefined
       }
     }
     Enums: {

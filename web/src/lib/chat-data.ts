@@ -1,7 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import {
   MESSAGE_PAGE_SIZE,
+  asChatType,
+  asRole,
   toChatSummary,
+  toMembers,
+  type ChatDetails,
   type ChatMessage,
   type PublicProfile,
 } from "@/lib/chat";
@@ -19,15 +23,21 @@ export async function getMyChats() {
   return data.map(toChatSummary);
 }
 
-/** The chat's other participant + recent messages, or null if not a member. */
-export async function getChat(chatId: string, meId: string) {
+/** The chat, its members and recent messages, or null if not a member. */
+export async function getChat(chatId: string, meId: string): Promise<{
+  details: ChatDetails;
+  other: PublicProfile | null;
+  messages: ChatMessage[];
+} | null> {
   const supabase = await createClient();
 
-  const [participants, messages] = await Promise.all([
+  const [chat, participants, membership, messages] = await Promise.all([
+    supabase.from("chats").select("id, type, title").eq("id", chatId).maybeSingle(),
     supabase
       .from("chat_participants")
-      .select("user_id, profiles(id, username, display_name, avatar_url)")
+      .select("user_id, role, joined_at, profiles(id, username, display_name, avatar_url)")
       .eq("chat_id", chatId),
+    supabase.rpc("get_chat_membership", { p_chat_id: chatId }),
     supabase
       .from("messages")
       .select("*")
@@ -36,21 +46,24 @@ export async function getChat(chatId: string, meId: string) {
       .limit(MESSAGE_PAGE_SIZE),
   ]);
 
-  if (participants.error || messages.error || !participants.data.length) return null;
+  const mine = membership.data?.[0];
+  if (chat.error || participants.error || membership.error || messages.error) return null;
+  if (!chat.data || !mine) return null; // not a participant, or no such chat
 
-  const otherRow = participants.data.find((p) => p.user_id !== meId);
-  const otherProfile = otherRow?.profiles;
-  const other: PublicProfile | null = otherProfile
-    ? {
-        id: otherProfile.id,
-        username: otherProfile.username,
-        displayName: otherProfile.display_name,
-        avatarUrl: otherProfile.avatar_url,
-      }
-    : null;
+  const members = toMembers(participants.data);
+  const type = asChatType(chat.data.type);
+  const other = type === "direct" ? (members.find((m) => m.id !== meId) ?? null) : null;
 
   return {
-    other,
+    details: {
+      id: chat.data.id,
+      type,
+      title: chat.data.title,
+      members,
+      myRole: asRole(mine.role),
+      isMuted: mine.is_muted,
+    },
+    other: other && { id: other.id, username: other.username, displayName: other.displayName, avatarUrl: other.avatarUrl },
     messages: messages.data.reverse() as ChatMessage[],
   };
 }

@@ -5,13 +5,24 @@ const sizes = {
   xl: "size-28 text-4xl",
 } as const;
 
-// Initials placeholder until avatar uploads (R2) land.
-export function Avatar({ name, size = "md" }: { name: string; size?: keyof typeof sizes }) {
+// Initials placeholder until avatar uploads (R2) land. Groups get their own
+// colour so they're easy to tell apart from people in the list.
+export function Avatar({
+  name,
+  size = "md",
+  group = false,
+}: {
+  name: string;
+  size?: keyof typeof sizes;
+  group?: boolean;
+}) {
   const initials = name.replace(/^@/, "").slice(0, 2) || "?";
   return (
     <div
       aria-hidden
-      className={`flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 font-semibold text-white uppercase ${sizes[size]}`}
+      className={`flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br font-semibold text-white uppercase ${
+        group ? "from-emerald-500 to-teal-600" : "from-indigo-500 to-violet-600"
+      } ${sizes[size]}`}
     >
       {initials}
     </div>

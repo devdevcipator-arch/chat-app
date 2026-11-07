@@ -21,18 +21,47 @@ export type PublicProfile = {
   avatarUrl: string | null;
 };
 
+export type ChatType = "direct" | "group";
+export type MemberRole = "admin" | "member";
+
 export type ChatSummary = {
   chatId: string;
-  type: string;
+  type: ChatType;
   createdAt: string;
+  /** Group name (null for direct chats). */
+  title: string | null;
+  memberCount: number;
+  myRole: MemberRole;
+  isMuted: boolean;
+  unreadCount: number;
+  /** The other person in a direct chat. */
   other: PublicProfile | null;
   lastMessage: {
     content: string | null;
     type: string;
     senderId: string | null;
+    senderName: string | null;
     createdAt: string;
   } | null;
 };
+
+export type ChatMember = PublicProfile & { role: MemberRole; joinedAt: string };
+
+/** What the chat page needs to render one conversation. */
+export type ChatDetails = {
+  id: string;
+  type: ChatType;
+  title: string | null;
+  members: ChatMember[];
+  myRole: MemberRole;
+  isMuted: boolean;
+};
+
+export const GROUP_TITLE_MAX = 60;
+export const GROUP_MEMBERS_MAX = 100;
+
+export const asChatType = (value: string): ChatType => (value === "group" ? "group" : "direct");
+export const asRole = (value: string | null | undefined): MemberRole => (value === "admin" ? "admin" : "member");
 
 export const MESSAGE_MAX = 4000;
 export const MESSAGE_PAGE_SIZE = 100;
@@ -46,8 +75,13 @@ export function toChatSummary(row: ChatRow): ChatSummary {
   const lastAt = row.last_message_at as string | null;
   return {
     chatId: row.chat_id,
-    type: row.chat_type,
+    type: asChatType(row.chat_type),
     createdAt: row.chat_created_at,
+    title: (row.title as string | null) ?? null,
+    memberCount: row.member_count ?? 0,
+    myRole: asRole(row.my_role),
+    isMuted: !!row.is_muted,
+    unreadCount: row.unread_count ?? 0,
     other: otherId
       ? {
           id: otherId,
@@ -61,6 +95,7 @@ export function toChatSummary(row: ChatRow): ChatSummary {
           content: row.last_message_content ?? null,
           type: row.last_message_type,
           senderId: row.last_message_sender_id ?? null,
+          senderName: (row.last_message_sender_name as string | null) ?? null,
           createdAt: lastAt,
         }
       : null,
@@ -70,6 +105,34 @@ export function toChatSummary(row: ChatRow): ChatSummary {
 export function profileName(profile: PublicProfile | null) {
   if (!profile) return "Deleted user";
   return profile.displayName || (profile.username ? `@${profile.username}` : "New user");
+}
+
+type MemberRow = {
+  user_id: string;
+  role: string;
+  joined_at: string;
+  profiles: { id: string; username: string | null; display_name: string | null; avatar_url: string | null } | null;
+};
+
+/** Participant rows (with embedded profile) to members: admins first, then by name. */
+export function toMembers(rows: MemberRow[]): ChatMember[] {
+  return rows
+    .map((row) => ({
+      id: row.user_id,
+      username: row.profiles?.username ?? null,
+      displayName: row.profiles?.display_name ?? null,
+      avatarUrl: row.profiles?.avatar_url ?? null,
+      role: asRole(row.role),
+      joinedAt: row.joined_at,
+    }))
+    .sort((a, b) =>
+      a.role !== b.role ? (a.role === "admin" ? -1 : 1) : profileName(a).localeCompare(profileName(b)),
+    );
+}
+
+/** Display name of a conversation: group title, or the other person. */
+export function chatName(chat: { type: ChatType; title: string | null; other: PublicProfile | null }) {
+  return chat.type === "group" ? chat.title || "Group" : profileName(chat.other);
 }
 
 export function messageSnippet(type: string, content: string | null) {

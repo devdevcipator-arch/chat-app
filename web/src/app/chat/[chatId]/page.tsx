@@ -30,6 +30,7 @@ async function ChatLoader({ params }: Pick<PageProps<"/chat/[chatId]">, "params"
       chatId={chatId}
       meId={me.id}
       other={chat.other}
+      details={chat.details}
       initialMessages={chat.messages}
     />
   );
