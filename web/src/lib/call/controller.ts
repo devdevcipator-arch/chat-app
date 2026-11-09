@@ -1,8 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { profileName } from "@/lib/chat";
 import type { Database } from "@/lib/database.types";
-import type { ICameraVideoTrack, IRemoteVideoTrack } from "agora-rtc-sdk-ng";
-import { CallError, CallSession, type MediaDevices, type RemoteParticipant } from "@/lib/call/agora-client";
+import type { ICameraVideoTrack, ILocalVideoTrack, IRemoteVideoTrack } from "agora-rtc-sdk-ng";
+import {
+  CallError,
+  CallSession,
+  screenShareSupported,
+  type MediaDevices,
+  type RemoteParticipant,
+} from "@/lib/call/agora-client";
 import { playTone } from "@/lib/call/ringtone";
 import {
   answerCall,
@@ -11,7 +17,9 @@ import {
   fetchCall,
   fetchRingingCalls,
   heartbeatCall,
+  joinScreenShareRoom,
   startCall,
+  type ScreenShareRoom,
   toSignal,
 } from "@/lib/call/signaling";
 import {
@@ -51,6 +59,18 @@ export type MediaState = {
   cameraError: string | null;
   /** The other person is sending video. */
   remoteVideoOn: boolean;
+  /** This browser can capture the screen (false on mobile browsers). */
+  screenShareSupported: boolean;
+  /** We're sharing our screen (it replaces our camera in the call). */
+  screenSharing: boolean;
+  /** Screen share start/stop in flight (the picker may be open). */
+  screenBusy: boolean;
+  /** Why screen sharing couldn't start. */
+  screenError: string | null;
+  /** While sharing: the camera comes back on when sharing stops. */
+  cameraResumesAfterShare: boolean;
+  /** Everyone else who is sharing their screen right now (user ids). */
+  remoteScreenUids: string[];
   /** Bumped whenever a video track appears or goes away, to re-render players. */
   videoVersion: number;
 };
@@ -68,8 +88,17 @@ const INITIAL_MEDIA: MediaState = {
   cameraId: null,
   cameraError: null,
   remoteVideoOn: false,
+  screenShareSupported: false,
+  screenSharing: false,
+  screenBusy: false,
+  screenError: null,
+  cameraResumesAfterShare: false,
+  remoteScreenUids: [],
   videoVersion: 0,
 };
+
+/** A remote participant, plus whether their video is a shared screen. */
+export type CallParticipant = RemoteParticipant & { screen: boolean };
 
 export const IDLE_SNAPSHOT: CallSnapshot = { call: { phase: "idle" }, media: INITIAL_MEDIA };
 
@@ -84,6 +113,7 @@ export class CallController {
   private snapshot: CallSnapshot = IDLE_SNAPSHOT;
   private listeners = new Set<() => void>();
   private session: CallSession | null = null;
+  private screenRoom: ScreenShareRoom | null = null;
   private stopTone: (() => void) | null = null;
   private timers = new Map<"ring" | "connect" | "heartbeat" | "dismiss" | "incoming", number>();
   /** Bumped whenever a call finishes, so in-flight async steps can bail out. */
@@ -145,9 +175,18 @@ export class CallController {
     return this.session?.remoteVideoTrack ?? null;
   }
 
-  /** Everyone else in the room (group calls), with their tracks. */
-  get remoteParticipants(): RemoteParticipant[] {
-    return this.session?.remoteParticipants ?? [];
+  /** Our shared screen while sharing (null otherwise). */
+  get localScreenTrack(): ILocalVideoTrack | null {
+    return this.session?.screenTrack ?? null;
+  }
+
+  /** Everyone else in the room, with their tracks and screen-share flag. */
+  get remoteParticipants(): CallParticipant[] {
+    const sharing = this.snapshot.media.remoteScreenUids;
+    return (this.session?.remoteParticipants ?? []).map((p) => ({
+      ...p,
+      screen: !!p.videoTrack && sharing.includes(p.uid),
+    }));
   }
 
   // --- User actions -----------------------------------------------------------
@@ -304,7 +343,9 @@ export class CallController {
   toggleCamera = async () => {
     const session = this.session;
     if (!session || this.snapshot.media.cameraBusy) return;
-    const enable = !this.snapshot.media.cameraOn;
+    const { screenSharing, cameraResumesAfterShare, cameraOn } = this.snapshot.media;
+    // While sharing, the button decides whether the camera returns afterwards.
+    const enable = screenSharing ? !cameraResumesAfterShare : !cameraOn;
     this.setMedia({ cameraBusy: true, cameraError: null });
     try {
       await session.setCameraEnabled(enable);
@@ -332,6 +373,29 @@ export class CallController {
   };
 
   dismissCameraError = () => this.setMedia({ cameraError: null });
+
+  /**
+   * Share screen / stop sharing. The screen replaces our camera while
+   * sharing; the mic keeps going throughout. Closing the browser's picker
+   * just leaves things as they were.
+   */
+  toggleScreenShare = async () => {
+    const session = this.session;
+    if (!session || this.snapshot.media.screenBusy) return;
+    this.setMedia({ screenBusy: true, screenError: null });
+    try {
+      if (session.isScreenSharing) await session.stopScreenShare();
+      else await session.startScreenShare(); // "cancelled" needs no message
+    } catch (e) {
+      if (this.session === session) {
+        this.setMedia({ screenError: e instanceof CallError ? e.message : "Couldn't start screen sharing." });
+      }
+    } finally {
+      if (this.session === session) this.syncVideo({ screenBusy: false });
+    }
+  };
+
+  dismissScreenError = () => this.setMedia({ screenError: null });
 
   toggleMute = async () => {
     if (!this.session) return;
@@ -517,13 +581,16 @@ export class CallController {
         onCameraError: (message) => {
           if (gen === this.generation) this.syncVideo({ cameraError: message });
         },
+        onScreenShareEnded: () => {
+          if (gen === this.generation) this.syncVideo();
+        },
       }, { video });
       if (gen !== this.generation) {
         void session.leave(); // releases mic + camera
         return null;
       }
       this.session = session;
-      this.syncVideo({ cameraError });
+      this.syncVideo({ cameraError, screenShareSupported: screenShareSupported() });
       const devices = await session.listDevices();
       if (gen === this.generation) this.setMedia({ devices, microphoneId: session.microphoneId || null });
       return session;
@@ -539,8 +606,12 @@ export class CallController {
   /** Copies the session's video state into the snapshot. */
   private syncVideo(extra: Partial<MediaState> = {}) {
     const session = this.session;
+    const screenSharing = !!session?.isScreenSharing;
+    this.screenRoom?.setSharing(screenSharing);
     this.setMedia({
       cameraOn: !!session?.localVideoTrack,
+      screenSharing,
+      cameraResumesAfterShare: !!session?.cameraResumesAfterShare,
       cameraId: session?.currentCameraId ?? this.snapshot.media.cameraId,
       remoteVideoOn: !!session?.remoteVideoTrack,
       videoVersion: this.snapshot.media.videoVersion + 1,
@@ -552,6 +623,15 @@ export class CallController {
   private async joinChannel(gen: number, chatId: string): Promise<boolean> {
     const session = this.session;
     if (!session) return false;
+    // Who's presenting travels over Realtime presence, not Agora.
+    this.screenRoom?.leave();
+    this.screenRoom = joinScreenShareRoom(this.supabase, chatId, this.meId, (uids) => {
+      if (gen !== this.generation) return;
+      const current = this.snapshot.media.remoteScreenUids;
+      if (uids.length === current.length && uids.every((u) => current.includes(u))) return;
+      this.syncVideo({ remoteScreenUids: uids });
+    });
+    this.screenRoom.setSharing(session.isScreenSharing);
     try {
       await session.join(callChannelName(chatId));
       return gen === this.generation;
@@ -614,7 +694,14 @@ export class CallController {
         reason,
         message: message ?? defaultMessage(reason),
       },
-      { cameraOn: false, remoteVideoOn: false, videoVersion: this.snapshot.media.videoVersion + 1 },
+      {
+        cameraOn: false,
+        remoteVideoOn: false,
+        screenSharing: false,
+        screenBusy: false,
+        remoteScreenUids: [],
+        videoVersion: this.snapshot.media.videoVersion + 1,
+      },
     );
     this.setTimer("dismiss", ENDED_BANNER_MS, () => this.set({ phase: "idle" }, INITIAL_MEDIA));
   }
@@ -623,9 +710,11 @@ export class CallController {
     this.stopRinging();
     for (const key of ["ring", "connect", "incoming", "dismiss"] as const) this.clearTimer(key);
     this.clearTimer("heartbeat");
+    this.screenRoom?.leave();
+    this.screenRoom = null;
     const session = this.session;
     this.session = null;
-    void session?.leave();
+    void session?.leave(); // also closes any screen track
   }
 
   private tone(kind: "ring" | "ringback") {

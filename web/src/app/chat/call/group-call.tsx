@@ -1,6 +1,6 @@
 "use client";
 
-import type { ICameraVideoTrack, IRemoteVideoTrack } from "agora-rtc-sdk-ng";
+import type { ILocalVideoTrack, IRemoteVideoTrack } from "agora-rtc-sdk-ng";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { Avatar } from "@/components/avatar";
@@ -13,10 +13,10 @@ import {
   MicOffIcon,
   MinimizeIcon,
   PhoneDownIcon,
+  ScreenShareIcon,
   SettingsIcon,
-  VideoIcon,
-  VideoOffIcon,
 } from "./icons";
+import { CameraButton, PresentingStage, RemoteScreenStage, ScreenShareButton, ScreenShareNotice } from "./screen-share";
 import { VideoView } from "./video-view";
 
 type Props = { call: GroupPhase; media: MediaState; controller: CallController };
@@ -30,7 +30,12 @@ type TileData = {
   avatarName: string;
   isMe: boolean;
   muted: boolean;
-  track: ICameraVideoTrack | IRemoteVideoTrack | null;
+  /** Camera video (null while the camera is off or the screen replaces it). */
+  track: ILocalVideoTrack | IRemoteVideoTrack | null;
+  /** Sharing their screen right now. */
+  presenting: boolean;
+  /** Their shared screen (remote participants only). */
+  screenTrack: IRemoteVideoTrack | null;
 };
 
 /** Me first, then everyone else in join order. */
@@ -45,7 +50,10 @@ function useTiles({ call, media, controller }: Props): TileData[] {
       avatarName: names.get(p.uid) ?? "Participant",
       isMe: false,
       muted: !p.audioOn,
-      track: p.videoTrack,
+      // A sharer's only video track is their screen; it goes on the stage.
+      track: p.screen ? null : p.videoTrack,
+      presenting: p.screen,
+      screenTrack: p.screen ? p.videoTrack : null,
     }),
   );
   const me: TileData = {
@@ -55,6 +63,8 @@ function useTiles({ call, media, controller }: Props): TileData[] {
     isMe: true,
     muted: media.muted,
     track: media.cameraOn ? controller.localVideoTrack : null,
+    presenting: media.screenSharing,
+    screenTrack: null,
   };
   return [me, ...remotes];
 }
@@ -68,7 +78,20 @@ function gridClass(count: number) {
   return "grid-cols-3 lg:grid-cols-4";
 }
 
-function Tile({ tile, compact = false }: { tile: TileData; compact?: boolean }) {
+function Tile({
+  tile,
+  compact = false,
+  className = "",
+  onSelect,
+  selected = false,
+}: {
+  tile: TileData;
+  compact?: boolean;
+  className?: string;
+  /** Strip tiles of presenters: show their screen on the stage. */
+  onSelect?: () => void;
+  selected?: boolean;
+}) {
   return (
     <motion.div
       layout
@@ -76,7 +99,23 @@ function Tile({ tile, compact = false }: { tile: TileData; compact?: boolean }) 
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.94 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className="relative min-h-0 overflow-hidden rounded-2xl bg-zinc-900 ring-1 ring-white/10"
+      onClick={onSelect}
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      aria-label={onSelect ? `Show ${tile.isMe ? "your" : `${tile.name}'s`} screen` : undefined}
+      onKeyDown={
+        onSelect
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect();
+              }
+            }
+          : undefined
+      }
+      className={`relative min-h-0 overflow-hidden rounded-2xl bg-zinc-900 ring-1 ${
+        selected ? "ring-2 ring-indigo-400" : tile.presenting ? "ring-indigo-400/50" : "ring-white/10"
+      } ${onSelect ? "cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-indigo-300" : ""} ${className}`}
     >
       <AnimatePresence initial={false}>
         {tile.track ? (
@@ -95,6 +134,12 @@ function Tile({ tile, compact = false }: { tile: TileData; compact?: boolean }) 
           </motion.div>
         )}
       </AnimatePresence>
+      {tile.presenting && (
+        <div className="absolute top-2 left-2 flex items-center gap-1 rounded-full bg-indigo-500/90 px-2 py-0.5 text-[11px] font-semibold text-white">
+          <ScreenShareIcon className="size-3" />
+          Presenting
+        </div>
+      )}
       <div className="absolute bottom-2 left-2 flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-full bg-black/60 py-0.5 pr-2 pl-1.5 text-xs font-medium text-white backdrop-blur">
         {tile.muted ? (
           <span className="flex size-4 items-center justify-center rounded-full bg-red-600" title="Muted">
@@ -114,9 +159,21 @@ export function GroupCallScreen({ call, media, controller, onMinimize }: Props &
   const tiles = useTiles({ call, media, controller });
   const clock = useCallClock(call);
   const [showDevices, setShowDevices] = useState(false);
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
   const video = call.callType === "video";
   const joining = call.status === "joining";
   const kind = video ? "Group video call" : "Group voice call";
+
+  // The stage shows one screen: the one picked from the strip, else the
+  // first remote presenter, else our own.
+  const presenters = tiles.filter((t) => t.presenting && (t.isMe || t.screenTrack));
+  const presenter =
+    presenters.find((t) => t.id === pinnedId) ?? presenters.find((t) => !t.isMe) ?? presenters[0] ?? null;
+  const presenterLabel = presenter
+    ? presenter.isMe
+      ? "You're presenting"
+      : `${presenter.name} is presenting`
+    : null;
 
   return (
     <motion.div
@@ -138,6 +195,7 @@ export function GroupCallScreen({ call, media, controller, onMinimize }: Props &
             className={`text-sm tabular-nums ${call.reconnecting ? "text-amber-300" : "text-white/60"}`}
           >
             {kind} · {tiles.length} in call · {statusText(call, clock)}
+            {presenterLabel && ` · ${presenterLabel}`}
           </p>
         </div>
       </div>
@@ -160,18 +218,50 @@ export function GroupCallScreen({ call, media, controller, onMinimize }: Props &
           </motion.div>
         )}
       </AnimatePresence>
+      <ScreenShareNotice media={media} controller={controller} className="mx-4 mb-2" />
 
-      {/* Grid: tiles keep their key (user id), so joins and leaves re-flow
-          the layout without restarting anyone's video. */}
-      <div className={`grid min-h-0 flex-1 auto-rows-fr gap-2 p-2 md:gap-3 md:p-3 ${gridClass(tiles.length)}`}>
-        <AnimatePresence mode="popLayout">
-          {tiles.map((tile) => (
-            <Tile key={tile.id} tile={tile} />
-          ))}
-        </AnimatePresence>
-      </div>
+      {presenter ? (
+        // Presenting: the screen fills the stage, everyone else in a strip below.
+        <div className="flex min-h-0 flex-1 flex-col gap-2 p-2 md:gap-3 md:p-3">
+          <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl bg-black ring-1 ring-white/10">
+            {presenter.isMe ? (
+              <PresentingStage
+                track={controller.localScreenTrack}
+                busy={media.screenBusy}
+                onStop={() => void controller.toggleScreenShare()}
+              />
+            ) : (
+              presenter.screenTrack && <RemoteScreenStage track={presenter.screenTrack} name={presenter.name} />
+            )}
+          </div>
+          <div className="flex shrink-0 gap-2 overflow-x-auto pb-1 md:gap-3" aria-label="Participants">
+            <AnimatePresence mode="popLayout">
+              {tiles.map((tile) => (
+                <Tile
+                  key={tile.id}
+                  tile={tile}
+                  compact
+                  className="aspect-video h-24 shrink-0 md:h-32"
+                  selected={presenters.length > 1 && tile.id === presenter.id}
+                  onSelect={tile.presenting && presenters.length > 1 ? () => setPinnedId(tile.id) : undefined}
+                />
+              ))}
+            </AnimatePresence>
+          </div>
+        </div>
+      ) : (
+        /* Grid: tiles keep their key (user id), so joins and leaves re-flow
+           the layout without restarting anyone's video. */
+        <div className={`grid min-h-0 flex-1 auto-rows-fr gap-2 p-2 md:gap-3 md:p-3 ${gridClass(tiles.length)}`}>
+          <AnimatePresence mode="popLayout">
+            {tiles.map((tile) => (
+              <Tile key={tile.id} tile={tile} />
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
 
-      {tiles.length === 1 && !joining && (
+      {tiles.length === 1 && !joining && !presenter && (
         <p className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-sm text-white/60">
           Waiting for others to join…
         </p>
@@ -202,15 +292,10 @@ export function GroupCallScreen({ call, media, controller, onMinimize }: Props &
             {media.muted ? <MicOffIcon className="size-6" /> : <MicIcon className="size-6" />}
           </RoundButton>
           {video && (
-            <RoundButton
-              size="sm"
-              label={media.cameraOn ? "Turn camera off" : "Turn camera on"}
-              active={!media.cameraOn}
-              disabled={media.cameraBusy}
-              onClick={() => void controller.toggleCamera()}
-            >
-              {media.cameraOn ? <VideoIcon className="size-6" /> : <VideoOffIcon className="size-6" />}
-            </RoundButton>
+            <>
+              <CameraButton media={media} controller={controller} />
+              <ScreenShareButton media={media} controller={controller} disabled={joining && !call.call} />
+            </>
           )}
           <button
             type="button"

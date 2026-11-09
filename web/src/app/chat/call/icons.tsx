@@ -98,3 +98,22 @@ export function FlipIcon({ className = "size-5" }: IconProps) {
     </svg>
   );
 }
+
+/** Share screen: a monitor with an arrow out of it. */
+export function ScreenShareIcon({ className = "size-5" }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="2" y="3" width="20" height="14" rx="2" />
+      <path d="M8 21h8M12 17v4M12 13V7M9 10l3-3 3 3" />
+    </svg>
+  );
+}
+
+/** Stop sharing: the monitor, crossed out. */
+export function ScreenShareOffIcon({ className = "size-5" }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M8 21h8M12 17v4M17 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 1-1.7M7 3h13a2 2 0 0 1 2 2v10a2 2 0 0 1-1.3 1.9M2 2l20 20" />
+    </svg>
+  );
+}

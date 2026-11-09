@@ -5,6 +5,9 @@ import type {
   IAgoraRTCClient,
   IAgoraRTCRemoteUser,
   ICameraVideoTrack,
+  ILocalAudioTrack,
+  ILocalTrack,
+  ILocalVideoTrack,
   IMicrophoneAudioTrack,
   IRemoteVideoTrack,
 } from "agora-rtc-sdk-ng";
@@ -30,7 +33,7 @@ function loadSdk() {
 export class CallError extends Error {
   constructor(
     message: string,
-    readonly kind: "mic" | "camera" | "network" | "server" = "server",
+    readonly kind: "mic" | "camera" | "screen" | "network" | "server" = "server",
   ) {
     super(message);
     this.name = "CallError";
@@ -55,6 +58,42 @@ function deviceErrorMessage(error: unknown, device: "microphone" | "camera"): st
     return "This browser can't make calls. Try a recent Chrome, Edge, Firefox or Safari.";
   }
   return `Couldn't start your ${device}. Please try again.`;
+}
+
+/**
+ * Screen picker errors. Closing the picker and a real "blocked" both surface
+ * as NotAllowedError; only the OS-level block says so in its message.
+ * Returns null when the user simply cancelled.
+ */
+function screenErrorMessage(error: unknown): string | null {
+  const code = (error as { code?: string } | null)?.code;
+  const name = (error as { name?: string } | null)?.name;
+  const message = String((error as { message?: string } | null)?.message ?? "");
+  if (code === "PERMISSION_DENIED" || name === "NotAllowedError" || name === "AbortError") {
+    if (/system/i.test(message)) {
+      return "Your system is blocking screen sharing. Allow screen recording for this browser in your OS privacy settings, then try again.";
+    }
+    return null; // the user closed the picker
+  }
+  if (code === "NOT_SUPPORTED" || name === "NotSupportedError" || name === "TypeError") {
+    return "This browser can't share your screen. Try a recent desktop Chrome, Edge, Firefox or Safari.";
+  }
+  if (code === "NOT_READABLE" || name === "NotReadableError") {
+    return "Couldn't capture your screen. Close other screen recorders and try again.";
+  }
+  return "Couldn't start screen sharing. Please try again.";
+}
+
+/** Whether this browser can capture the screen at all (no mobile browsers). */
+export function screenShareSupported(): boolean {
+  return typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getDisplayMedia === "function";
+}
+
+/** Stops capture and releases a local track (ends the browser's sharing indicator). */
+function closeTrack(track: ILocalTrack | null) {
+  if (!track) return;
+  track.stop();
+  track.close();
 }
 
 export async function fetchAgoraToken(channelName: string): Promise<AgoraTokenResponse> {
@@ -102,6 +141,11 @@ export type CallSessionEvents = {
   onLocalVideoChanged: () => void;
   /** The camera failed or was unplugged; the call carries on without video. */
   onCameraError: (message: string) => void;
+  /**
+   * Screen sharing stopped on its own: the browser's "Stop sharing" bar, or
+   * the shared window closed. (Also fires onLocalVideoChanged.)
+   */
+  onScreenShareEnded: () => void;
   /** Our own link to Agora is reconnecting (true) or back (false). */
   onReconnecting: (reconnecting: boolean) => void;
   /** Our link to Agora is gone for good. */
@@ -113,20 +157,34 @@ export type CallSessionEvents = {
 };
 
 const CAMERA_CONFIG = { encoderConfig: "720p_2", optimizationMode: "motion" } as const;
+// "detail" keeps text sharp (frame rate drops first under load).
+const SCREEN_CONFIG = { encoderConfig: "1080p_2", optimizationMode: "detail" } as const;
+
+export type ScreenShareResult = "started" | "cancelled";
 
 /**
  * One call's media session. Usage:
  *   const s = await CallSession.create(events, { video })   // asks for mic (+ camera)
  *   await s.join(channelName)
  *   await s.setCameraEnabled(false)                       // camera light goes off
+ *   await s.startScreenShare()                            // replaces the camera
  *   await s.leave()                                       // releases every device
+ *
+ * A client publishes one video track at a time, so the screen takes the
+ * camera's place while sharing and the camera comes back afterwards (if it
+ * was on). The microphone is never touched by either.
  */
 export class CallSession {
   private client: IAgoraRTCClient | null = null;
   private camera: ICameraVideoTrack | null = null;
   private cameraId: string | null = null;
   private speakerId: string | null = null;
-  /** Serializes camera on/off/switch so rapid clicks can't leak a track. */
+  private screen: ILocalVideoTrack | null = null;
+  /** Tab/system audio captured with the screen (Chrome/Edge, when ticked). */
+  private screenAudio: ILocalAudioTrack | null = null;
+  /** The camera was on when sharing started: turn it back on afterwards. */
+  private resumeCamera = false;
+  /** Serializes camera on/off/switch and screen start/stop so rapid clicks can't leak a track. */
   private cameraQueue: Promise<unknown> = Promise.resolve();
   private closed = false;
 
@@ -198,6 +256,21 @@ export class CallSession {
     return this.camera;
   }
 
+  /** We're publishing our screen instead of the camera. */
+  get isScreenSharing(): boolean {
+    return this.screen !== null;
+  }
+
+  /** Our screen track while sharing (for the local preview). */
+  get screenTrack(): ILocalVideoTrack | null {
+    return this.screen;
+  }
+
+  /** While sharing: whether the camera comes back when sharing stops. */
+  get cameraResumesAfterShare(): boolean {
+    return this.resumeCamera;
+  }
+
   /** 1-on-1 calls: the other person's video while they're sending it. */
   get remoteVideoTrack(): IRemoteVideoTrack | null {
     return this.remoteParticipants.find((p) => p.videoTrack)?.videoTrack ?? null;
@@ -260,7 +333,8 @@ export class CallSession {
     try {
       await client.join(appId, channelName, token, uid);
       if (this.closed) return;
-      await client.publish(this.camera ? [this.mic, this.camera] : [this.mic]);
+      // Sharing may have started while we were still joining.
+      await client.publish(this.localTracks());
     } catch (e) {
       if (this.closed) return;
       throw new CallError(
@@ -300,6 +374,13 @@ export class CallSession {
    */
   setCameraEnabled(enabled: boolean): Promise<void> {
     return this.enqueueCamera(async () => {
+      if (this.screen) {
+        // The screen holds the video slot: just decide whether the camera
+        // comes back when sharing stops.
+        this.resumeCamera = enabled;
+        this.events.onLocalVideoChanged();
+        return;
+      }
       if (enabled) {
         if (this.camera) return;
         await this.openCamera();
@@ -318,6 +399,70 @@ export class CallSession {
       this.cameraId = deviceId;
       if (this.camera) await this.camera.setDevice(deviceId);
     });
+  }
+
+  /**
+   * Opens the browser's screen picker and publishes the chosen screen in
+   * place of the camera. Resolves "cancelled" if the picker was closed
+   * (nothing changes). Throws CallError(kind "screen") on a real failure;
+   * the camera and mic are left exactly as they were.
+   */
+  async startScreenShare(): Promise<ScreenShareResult> {
+    const result = await this.enqueueVideo(async (): Promise<ScreenShareResult> => {
+      if (this.screen) return "started";
+      if (!screenShareSupported()) throw new CallError(screenErrorMessage({ name: "NotSupportedError" })!, "screen");
+
+      // 1. Pick first: cancelling must not cost the camera.
+      let video: ILocalVideoTrack;
+      let audio: ILocalAudioTrack | null = null;
+      try {
+        // "auto": include tab/system audio when the browser offers it and the user ticks it.
+        const created = await this.AgoraRTC.createScreenVideoTrack(SCREEN_CONFIG, "auto");
+        [video, audio] = Array.isArray(created) ? created : [created, null];
+      } catch (e) {
+        const message = screenErrorMessage(e);
+        if (message === null) return "cancelled";
+        throw new CallError(message, "screen");
+      }
+      if (this.closed) {
+        closeTrack(video);
+        closeTrack(audio);
+        return "cancelled";
+      }
+
+      // 2. Free the video slot. Closing (not just unpublishing) turns the camera light off.
+      const cameraWasOn = !!this.camera;
+      await this.closeCamera();
+
+      // 3. Publish the screen (if we're not connected yet, join() publishes it).
+      this.screen = video;
+      this.screenAudio = audio;
+      this.resumeCamera = cameraWasOn;
+      try {
+        if (this.connected) await this.client!.publish(audio ? [video, audio] : video);
+      } catch {
+        this.screen = null;
+        this.screenAudio = null;
+        closeTrack(video);
+        closeTrack(audio);
+        await this.restoreCamera(cameraWasOn);
+        throw new CallError("Couldn't share your screen with the call. Please try again.", "screen");
+      }
+
+      // 4. The browser's own "Stop sharing" bar (or the shared window closing).
+      video.on("track-ended", () => {
+        if (this.screen !== video) return;
+        void this.enqueueVideo(() => this.closeScreen()).then(() => this.events.onScreenShareEnded());
+      });
+      this.events.onLocalVideoChanged();
+      return "started";
+    });
+    return result ?? "cancelled"; // the call ended first
+  }
+
+  /** Stops sharing and brings the camera back if it was on before. */
+  async stopScreenShare(): Promise<void> {
+    await this.enqueueVideo(() => this.closeScreen());
   }
 
   async listDevices(): Promise<MediaDevices> {
@@ -353,6 +498,12 @@ export class CallSession {
     this.camera = null;
     camera?.stop();
     camera?.close();
+    // Ends the browser's "sharing this tab/screen" indicator too.
+    closeTrack(this.screen);
+    closeTrack(this.screenAudio);
+    this.screen = null;
+    this.screenAudio = null;
+    this.resumeCamera = false;
     const client = this.client;
     this.client = null;
     if (client) {
@@ -364,9 +515,57 @@ export class CallSession {
   // --- Internals --------------------------------------------------------------
 
   private enqueueCamera(task: () => Promise<void>): Promise<void> {
+    return this.enqueueVideo(task).then(() => {});
+  }
+
+  /** Camera and screen share one video slot, so they share one queue. */
+  private enqueueVideo<T>(task: () => Promise<T>): Promise<T | undefined> {
     const run = this.cameraQueue.then(() => (this.closed ? undefined : task()));
     this.cameraQueue = run.catch(() => {});
     return run;
+  }
+
+  private get connected() {
+    return !!this.client && this.client.connectionState === "CONNECTED";
+  }
+
+  /** What we publish: the mic, plus the screen or else the camera. */
+  private localTracks(): ILocalTrack[] {
+    if (this.screen) return this.screenAudio ? [this.mic, this.screen, this.screenAudio] : [this.mic, this.screen];
+    return this.camera ? [this.mic, this.camera] : [this.mic];
+  }
+
+  private async closeScreen() {
+    const screen = this.screen;
+    if (!screen) return;
+    const audio = this.screenAudio;
+    this.screen = null;
+    this.screenAudio = null;
+    if (this.connected) await this.client!.unpublish(audio ? [screen, audio] : screen).catch(() => {});
+    closeTrack(screen);
+    closeTrack(audio);
+    const resume = this.resumeCamera;
+    this.resumeCamera = false;
+    this.events.onLocalVideoChanged();
+    await this.restoreCamera(resume);
+  }
+
+  /** Re-opens and publishes the camera after sharing; failures only warn. */
+  private async restoreCamera(enabled: boolean) {
+    if (!enabled || this.closed || this.camera) return;
+    try {
+      await this.openCamera();
+    } catch (e) {
+      this.events.onCameraError(e instanceof CallError ? e.message : deviceErrorMessage(e, "camera"));
+      return;
+    }
+    if (!this.camera || !this.connected) return;
+    try {
+      await this.client!.publish(this.camera);
+    } catch {
+      await this.closeCamera(); // don't leave a camera running that nobody sees
+      this.events.onCameraError("Couldn't turn your camera back on. Try the camera button.");
+    }
   }
 
   private async openCamera() {

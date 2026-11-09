@@ -155,3 +155,65 @@ export function endCallOnUnload(callId: string, accessToken: string) {
     body: JSON.stringify({ p_call_id: callId, p_timeout: false }),
   }).catch(() => {});
 }
+
+// --- Screen-share presence -----------------------------------------------------
+
+export type ScreenShareRoom = {
+  /** Announce whether we're presenting (deduplicated; re-sent after reconnects). */
+  setSharing: (sharing: boolean) => void;
+  leave: () => void;
+};
+
+/**
+ * Who in the call is sharing their screen, via Realtime presence on the
+ * private channel `call-screen:<chatId>` (participants only, see the
+ * call_screen_share_presence migration). `onChange` gets everyone else's
+ * user id that is currently sharing. If the channel can't be joined the call
+ * is unaffected; remote screens then simply show like a camera.
+ */
+export function joinScreenShareRoom(
+  supabase: Client,
+  chatId: string,
+  meId: string,
+  onChange: (sharingUserIds: string[]) => void,
+): ScreenShareRoom {
+  let sharing = false;
+  let subscribed = false;
+  let left = false;
+
+  const channel = supabase.channel(`call-screen:${chatId}`, {
+    config: { private: true, presence: { key: meId } },
+  });
+
+  const emit = () => {
+    if (left) return;
+    const state = channel.presenceState<{ sharing?: boolean }>();
+    onChange(
+      Object.entries(state)
+        .filter(([userId, metas]) => userId !== meId && metas.some((m) => m.sharing === true))
+        .map(([userId]) => userId),
+    );
+  };
+
+  channel.on("presence", { event: "sync" }, emit).subscribe((status) => {
+    if (status === "SUBSCRIBED") {
+      subscribed = true;
+      void channel.track({ sharing });
+    } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+      subscribed = false;
+    }
+  });
+
+  return {
+    setSharing(next) {
+      if (next === sharing) return;
+      sharing = next;
+      if (subscribed && !left) void channel.track({ sharing });
+    },
+    leave() {
+      if (left) return;
+      left = true;
+      void supabase.removeChannel(channel);
+    },
+  };
+}

@@ -74,6 +74,7 @@ export function RoundButton({
   onClick,
   children,
   size = "md",
+  tone = "plain",
 }: {
   label: string;
   active: boolean;
@@ -81,7 +82,13 @@ export function RoundButton({
   onClick: () => void;
   children: ReactNode;
   size?: "sm" | "md";
+  /** "accent": active means "on air" (screen sharing), shown in indigo, not white. */
+  tone?: "plain" | "accent";
 }) {
+  const activeClass =
+    tone === "accent"
+      ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/40 ring-2 ring-indigo-300/60 hover:bg-indigo-400"
+      : "bg-white text-zinc-900";
   return (
     <button
       type="button"
@@ -92,7 +99,7 @@ export function RoundButton({
       title={label}
       className={`flex shrink-0 items-center justify-center rounded-full backdrop-blur transition active:scale-95 disabled:opacity-40 ${
         size === "sm" ? "size-12" : "size-14"
-      } ${active ? "bg-white text-zinc-900" : "bg-white/15 text-white hover:bg-white/25"}`}
+      } ${active ? activeClass : "bg-white/15 text-white hover:bg-white/25"}`}
     >
       {children}
     </button>

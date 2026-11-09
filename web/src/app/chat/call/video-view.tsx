@@ -1,6 +1,6 @@
 "use client";
 
-import type { ICameraVideoTrack, IRemoteVideoTrack } from "agora-rtc-sdk-ng";
+import type { ILocalVideoTrack, IRemoteVideoTrack } from "agora-rtc-sdk-ng";
 import { useEffect, useRef } from "react";
 
 /**
@@ -15,7 +15,7 @@ export function VideoView({
   fit = "cover",
   className = "",
 }: {
-  track: ICameraVideoTrack | IRemoteVideoTrack;
+  track: ILocalVideoTrack | IRemoteVideoTrack;
   mirror?: boolean;
   fit?: "cover" | "contain";
   className?: string;
