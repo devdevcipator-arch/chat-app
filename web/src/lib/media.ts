@@ -46,11 +46,15 @@ export function isMediaMimeType(type: string): type is MediaMimeType {
   return mediaKind(type) !== null;
 }
 
-/** Object keys look like chats/<chatId>/<userId>/<uuid>.<ext>. */
+/**
+ * Object keys look like chats/<chatId>/<userId>/<uuid>.<ext>. The extra
+ * extensions (gif, video, documents) only arrive by forwarding from the
+ * gallery (see lib/vault.ts); direct chat uploads stay images + audio.
+ */
 export const OBJECT_KEY_PATTERN =
-  /^chats\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(webp|jpg|png|webm|ogg|mp3|m4a|aac|wav)$/;
+  /^chats\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(webp|jpg|png|gif|webm|ogg|mp3|m4a|aac|wav|mp4|mov|pdf|txt|csv|zip|docx|xlsx|pptx)$/;
 
-function publicBase() {
+export function publicBase() {
   const raw = (process.env.NEXT_PUBLIC_R2_PUBLIC_DOMAIN ?? "").trim().replace(/\/+$/, "");
   if (!raw) return "";
   return /^https?:\/\//.test(raw) ? raw : `https://${raw}`;

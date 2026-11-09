@@ -141,8 +141,10 @@ export function messageSnippet(type: string, content: string | null) {
       return "📷 Photo";
     case "audio":
       return "🎤 Voice message";
+    case "video":
+      return "🎬 Video";
     case "file":
-      return "📎 File";
+      return content ? `📎 ${content}` : "📎 File";
     default:
       return content ?? "";
   }

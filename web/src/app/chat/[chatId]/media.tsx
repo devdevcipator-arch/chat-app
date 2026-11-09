@@ -95,6 +95,63 @@ export function AudioMessage({ src, mine }: { src: string | null; mine: boolean 
   );
 }
 
+// --- Video bubble -----------------------------------------------------------
+
+export function VideoMessage({ src, name }: { src: string | null; name: string | null }) {
+  if (!src) {
+    return <p className="rounded-2xl bg-zinc-100 px-3.5 py-2 text-xs text-zinc-500 dark:bg-zinc-800">Video unavailable</p>;
+  }
+  return (
+    <div className="overflow-hidden rounded-2xl bg-black">
+      <video
+        controls
+        playsInline
+        preload="metadata"
+        src={src}
+        aria-label={name ?? "Shared video"}
+        className="block max-h-80 w-72 max-w-[70vw]"
+      >
+        <track kind="captions" />
+      </video>
+    </div>
+  );
+}
+
+// --- File bubble ------------------------------------------------------------
+
+export function FileMessage({ src, name, mine }: { src: string | null; name: string | null; mine: boolean }) {
+  const label = name || "File";
+  const ext = label.includes(".") ? label.split(".").pop()!.toUpperCase().slice(0, 4) : "FILE";
+  const body = (
+    <>
+      <span
+        aria-hidden
+        className={`flex size-10 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold ${
+          mine ? "bg-white/20 text-white" : "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
+        }`}
+      >
+        {ext}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">{label}</span>
+        <span className={`block text-xs ${mine ? "text-indigo-100" : "text-zinc-500"}`}>
+          {src ? "Open file" : "File unavailable"}
+        </span>
+      </span>
+    </>
+  );
+  const className = `flex w-64 max-w-[70vw] items-center gap-3 rounded-2xl px-3 py-2.5 ${
+    mine ? "bg-indigo-600 text-white" : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+  }`;
+  return src ? (
+    <a href={src} target="_blank" rel="noopener noreferrer" className={`${className} transition hover:brightness-95`}>
+      {body}
+    </a>
+  ) : (
+    <div className={className}>{body}</div>
+  );
+}
+
 // --- Lightbox ---------------------------------------------------------------
 
 export function Lightbox({ src, onClose }: { src: string | null; onClose: () => void }) {

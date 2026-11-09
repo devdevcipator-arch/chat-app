@@ -14,9 +14,9 @@ export async function proxy(request: NextRequest) {
 
   const isLogin = matches(path, "/login");
   const isOnboarding = matches(path, "/onboarding");
-  const isChat = matches(path, "/chat");
+  const isApp = matches(path, "/chat") || matches(path, "/gallery");
 
-  if (!isLogin && !isOnboarding && !isChat) return response;
+  if (!isLogin && !isOnboarding && !isApp) return response;
 
   if (!userId) {
     return isLogin ? response : redirectWithSession(request, "/login", response);

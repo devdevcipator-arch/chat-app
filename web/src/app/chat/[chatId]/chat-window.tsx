@@ -42,7 +42,7 @@ import { CallButton } from "../call/call-button";
 import { GroupCallBanner } from "../call/group-call-banner";
 import { ChatMenu } from "../chat-menu";
 import { GroupInfo } from "./group-info";
-import { AudioMessage, ImageMessage, Lightbox } from "./media";
+import { AudioMessage, FileMessage, ImageMessage, Lightbox, VideoMessage } from "./media";
 
 type Props = {
   chatId: string;
@@ -461,6 +461,12 @@ function MessageBubble({
       break;
     case "audio":
       body = <AudioMessage src={mediaSrc} mine={mine} />;
+      break;
+    case "video":
+      body = <VideoMessage src={mediaSrc} name={message.content} />;
+      break;
+    case "file":
+      body = <FileMessage src={mediaSrc} name={message.content} mine={mine} />;
       break;
     case "text":
       body = (

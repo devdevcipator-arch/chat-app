@@ -120,9 +120,10 @@ export async function requestUploadUrl(body: UploadUrlRequest): Promise<UploadUr
 
 /** PUTs the file straight to R2, reporting progress from 0 to 1. */
 export function uploadToR2(
-  target: UploadUrlResponse,
+  target: Pick<UploadUrlResponse, "uploadUrl" | "headers">,
   blob: Blob,
   onProgress?: (fraction: number) => void,
+  timeoutMs = 120_000,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -137,7 +138,7 @@ export function uploadToR2(
         : reject(new UploadError(`Upload failed (${xhr.status}). Please try again.`));
     xhr.onerror = () => reject(new UploadError("Upload failed. Check your connection."));
     xhr.ontimeout = () => reject(new UploadError("Upload timed out. Please try again."));
-    xhr.timeout = 120_000;
+    xhr.timeout = timeoutMs;
     xhr.send(blob);
   });
 }

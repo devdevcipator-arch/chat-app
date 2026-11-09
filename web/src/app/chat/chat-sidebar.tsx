@@ -235,12 +235,35 @@ export function ChatSidebar({
     <>
       <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
         <h1 className="text-lg font-semibold tracking-tight">Chats</h1>
-        <NewGroupButton
-          meId={me.id}
-          onCreated={async () => {
-            await refresh();
-          }}
-        />
+        <div className="flex items-center gap-0.5">
+          <Link
+            href="/gallery"
+            title="My Gallery"
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-indigo-600 transition hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950/50"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="size-4"
+              aria-hidden
+            >
+              <rect x="3" y="3" width="18" height="18" rx="3" />
+              <circle cx="9" cy="9" r="2" />
+              <path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
+            </svg>
+            Gallery
+          </Link>
+          <NewGroupButton
+            meId={me.id}
+            onCreated={async () => {
+              await refresh();
+            }}
+          />
+        </div>
       </div>
 
       <UserSearch meId={me.id} onStartChat={startChat} />
