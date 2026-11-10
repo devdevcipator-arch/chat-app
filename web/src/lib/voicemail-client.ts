@@ -10,27 +10,8 @@ import { VOICEMAIL_MAX_SECONDS } from "@/lib/call/types";
 
 type Client = SupabaseClient<Database>;
 
-/** Recording formats in order of preference, with the type we upload as. */
-const RECORDING_FORMATS: { recorder: string; upload: AudioMimeType }[] = [
-  { recorder: "audio/webm;codecs=opus", upload: "audio/webm" },
-  { recorder: "audio/webm", upload: "audio/webm" },
-  { recorder: "audio/ogg;codecs=opus", upload: "audio/ogg" },
-  { recorder: "audio/mp4", upload: "audio/mp4" }, // Safari
-];
-
-export type RecordingFormat = (typeof RECORDING_FORMATS)[number];
-
-/** The best format this browser can record, or null if it can't record audio. */
-export function pickRecordingFormat(): RecordingFormat | null {
-  if (typeof window === "undefined" || typeof MediaRecorder === "undefined") return null;
-  return RECORDING_FORMATS.find((f) => MediaRecorder.isTypeSupported(f.recorder)) ?? null;
-}
-
-/** Maps whatever the recorder actually produced to a type the upload API accepts. */
-export function uploadTypeFor(recordedType: string, fallback: AudioMimeType): AudioMimeType {
-  const base = recordedType.split(";")[0].trim().toLowerCase();
-  return base in AUDIO_TYPES ? (base as AudioMimeType) : fallback;
-}
+// Recording formats live with the shared recorder.
+export { pickRecordingFormat, uploadTypeFor, type RecordingFormat } from "@/lib/audio-recorder";
 
 export const clampVoicemailSeconds = (seconds: number) =>
   Math.min(VOICEMAIL_MAX_SECONDS, Math.max(1, Math.round(seconds)));

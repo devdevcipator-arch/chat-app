@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { formatDuration } from "@/lib/chat";
 
-// Custom audio player for voicemails: play/pause, a seekable waveform and a
-// 1x / 1.5x / 2x speed toggle. Used in chat bubbles and the recorder preview.
+// Custom audio player for voice notes and voicemails: play/pause, a seekable
+// waveform with elapsed / total time, and a 1x / 1.5x / 2x speed toggle.
+// Used in chat bubbles and the voicemail recorder preview.
 // Give it `key={src}` where the source can change, so playback state resets.
 
 const SPEEDS = [1, 1.5, 2] as const;
@@ -41,19 +42,25 @@ export function normaliseLevels(levels: number[], count = BAR_COUNT): number[] {
   return out.map((v) => Math.max(0.15, v / max));
 }
 
-export function VoicemailPlayer({
+export function AudioPlayer({
   src,
   durationSeconds,
   bars,
   tone,
+  label = "voice message",
   onFirstPlay,
 }: {
   src: string;
-  /** Known length; browsers often report Infinity for fresh WebM recordings. */
-  durationSeconds: number;
+  /**
+   * Known length; browsers often report Infinity for fresh WebM recordings.
+   * Null (e.g. an uploaded file) waits for the file's metadata.
+   */
+  durationSeconds: number | null;
   bars: number[];
   /** "accent" on an indigo bubble, "neutral" on a grey one, "dark" in the call UI. */
   tone: "accent" | "neutral" | "dark";
+  /** For screen readers: "Play voicemail", "Seek voice message"... */
+  label?: string;
   onFirstPlay?: () => void;
 }) {
   const audio = useRef<HTMLAudioElement>(null);
@@ -65,7 +72,7 @@ export function VoicemailPlayer({
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
   const [failed, setFailed] = useState(false);
 
-  const duration = mediaDuration ?? durationSeconds;
+  const duration = mediaDuration ?? durationSeconds ?? 0;
   const fraction = duration > 0 ? Math.min(1, current / duration) : 0;
 
   useEffect(() => {
@@ -79,8 +86,8 @@ export function VoicemailPlayer({
       el.pause();
       return;
     }
-    // Only one voicemail plays at a time.
-    document.querySelectorAll<HTMLAudioElement>("audio[data-voicemail]").forEach((other) => {
+    // Only one recording plays at a time.
+    document.querySelectorAll<HTMLAudioElement>("audio[data-player]").forEach((other) => {
       if (other !== el) other.pause();
     });
     try {
@@ -162,7 +169,7 @@ export function VoicemailPlayer({
     <div className="flex w-full items-center gap-2.5">
       <audio
         ref={audio}
-        data-voicemail
+        data-player
         src={src}
         preload="metadata"
         onPlay={() => setPlaying(true)}
@@ -184,7 +191,7 @@ export function VoicemailPlayer({
         type="button"
         onClick={() => void toggle()}
         disabled={failed}
-        aria-label={playing ? "Pause voicemail" : "Play voicemail"}
+        aria-label={playing ? `Pause ${label}` : `Play ${label}`}
         className={`flex size-10 shrink-0 items-center justify-center rounded-full shadow-sm transition active:scale-95 disabled:opacity-40 ${colors.button}`}
       >
         {playing ? (
@@ -204,7 +211,7 @@ export function VoicemailPlayer({
           ref={track}
           role="slider"
           tabIndex={0}
-          aria-label="Seek voicemail"
+          aria-label={`Seek ${label}`}
           aria-valuemin={0}
           aria-valuemax={Math.round(duration)}
           aria-valuenow={Math.round(current)}
@@ -226,7 +233,14 @@ export function VoicemailPlayer({
           ))}
         </div>
         <div className={`mt-0.5 flex items-center justify-between text-[11px] tabular-nums ${colors.text}`}>
-          <span>{failed ? "Can't play this recording" : formatDuration(playing || current > 0 ? current : duration)}</span>
+          {failed ? (
+            <span>Can&apos;t play this recording</span>
+          ) : (
+            <>
+              <span>{formatDuration(current)}</span>
+              <span>{duration > 0 ? formatDuration(duration) : "--:--"}</span>
+            </>
+          )}
         </div>
       </div>
 

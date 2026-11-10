@@ -44,7 +44,9 @@ import { GroupCallBanner } from "../call/group-call-banner";
 import { ChatMenu } from "../chat-menu";
 import { GroupInfo } from "./group-info";
 import { AudioMessage, FileMessage, ImageMessage, Lightbox, VideoMessage } from "./media";
+import { VOICE_NOTE_MAX_SECONDS, VoiceNoteBar } from "./voice-note-bar";
 import { VoicemailMessage } from "./voicemail-message";
+import type { RecordedAudio } from "@/lib/audio-recorder";
 
 type Props = {
   chatId: string;
@@ -60,6 +62,8 @@ type PreparedMedia = {
   type: MediaMimeType;
   kind: "image" | "audio";
   fileName: string;
+  /** Recorded voice notes know their length. */
+  durationSeconds?: number;
 };
 
 const errorText = (e: unknown) =>
@@ -187,6 +191,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
           message_type: message.message_type,
           content: message.content,
           media_url: mediaKey,
+          duration_seconds: message.duration_seconds,
         })
         .select()
         .single();
@@ -283,7 +288,27 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       setNotice(errorText(e));
       return;
     }
+    queueMedia(media);
+  }
 
+  /** A voice note from the composer: same upload pipeline, plus its length. */
+  function handleVoiceNote(audio: RecordedAudio) {
+    setNotice(null);
+    if (audio.blob.size > MAX_UPLOAD_BYTES.audio) {
+      setNotice("That recording is too large to send.");
+      return;
+    }
+    queueMedia({
+      blob: audio.blob,
+      type: audio.type,
+      kind: "audio",
+      fileName: `voice-message.${AUDIO_TYPES[audio.type]}`,
+      durationSeconds: Math.min(VOICE_NOTE_MAX_SECONDS, Math.max(1, Math.round(audio.seconds))),
+    });
+  }
+
+  /** Shows the media optimistically and starts uploading it. */
+  function queueMedia(media: PreparedMedia) {
     const localUrl = URL.createObjectURL(media.blob);
     objectUrls.current.add(localUrl);
     const optimistic: ChatMessage = {
@@ -293,7 +318,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       message_type: media.kind,
       content: null,
       media_url: null,
-      duration_seconds: null,
+      duration_seconds: media.durationSeconds ?? null,
       call_id: null,
       voicemail_played_at: null,
       created_at: new Date().toISOString(),
@@ -451,7 +476,12 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
         )}
       </AnimatePresence>
 
-      <Composer onSend={handleSendText} onAttach={(file) => void handleAttach(file)} />
+      <Composer
+        onSend={handleSendText}
+        onAttach={(file) => void handleAttach(file)}
+        onVoiceNote={handleVoiceNote}
+        onNotice={setNotice}
+      />
       <Lightbox src={lightbox} onClose={closeLightbox} />
       {group && <GroupInfo open={infoOpen} onClose={closeInfo} meId={meId} details={details} />}
     </section>
@@ -489,7 +519,16 @@ function MessageBubble({
       body = <ImageMessage src={mediaSrc} progress={message.progress} sending={sending} onOpen={onOpenImage} />;
       break;
     case "audio":
-      body = <AudioMessage src={mediaSrc} mine={mine} />;
+      body = (
+        <AudioMessage
+          id={message.id}
+          src={mediaSrc}
+          durationSeconds={message.duration_seconds}
+          mine={mine}
+          sending={sending}
+          progress={message.progress}
+        />
+      );
       break;
     case "video":
       body = <VideoMessage src={mediaSrc} name={message.content} />;
@@ -541,7 +580,10 @@ function MessageBubble({
     >
       <div className={`flex max-w-[80%] flex-col md:max-w-[65%] ${mine ? "items-end" : "items-start"}`}>
         {senderLabel && !grouped && (
-          <span className="mb-0.5 px-1 text-xs font-medium text-indigo-600 dark:text-indigo-400">{senderLabel}</span>
+          <span className="mb-1 flex items-center gap-1.5 px-0.5 text-xs font-medium text-indigo-600 dark:text-indigo-400">
+            <Avatar name={senderLabel} size="xs" />
+            {senderLabel}
+          </span>
         )}
         {body}
         <div className="mt-0.5 flex items-center gap-1.5 px-1 text-[11px] text-zinc-500">
@@ -565,8 +607,20 @@ function MessageBubble({
   );
 }
 
-function Composer({ onSend, onAttach }: { onSend: (content: string) => void; onAttach: (file: File) => void }) {
+function Composer({
+  onSend,
+  onAttach,
+  onVoiceNote,
+  onNotice,
+}: {
+  onSend: (content: string) => void;
+  onAttach: (file: File) => void;
+  onVoiceNote: (audio: RecordedAudio) => void;
+  onNotice: (message: string) => void;
+}) {
   const [text, setText] = useState("");
+  const [recording, setRecording] = useState(false);
+  const stopRecording = useCallback(() => setRecording(false), []);
   const input = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -598,6 +652,14 @@ function Composer({ onSend, onAttach }: { onSend: (content: string) => void; onA
     const files = Array.from(e.target.files ?? []);
     e.target.value = ""; // allow picking the same file again
     files.slice(0, 10).forEach(onAttach);
+  }
+
+  if (recording) {
+    return (
+      <div className="flex shrink-0 items-end gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
+        <VoiceNoteBar onSend={onVoiceNote} onClose={stopRecording} onNotice={onNotice} />
+      </div>
+    );
   }
 
   return (
@@ -637,6 +699,18 @@ function Composer({ onSend, onAttach }: { onSend: (content: string) => void; onA
         autoFocus
         className="max-h-40 min-h-10 flex-1 resize-none rounded-2xl border border-zinc-300 bg-white px-4 py-2 text-[15px] outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-900"
       />
+      <button
+        type="button"
+        onClick={() => setRecording(true)}
+        aria-label="Record voice message"
+        title="Record voice message"
+        className="flex size-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className="size-5" aria-hidden>
+          <rect x="9" y="2.5" width="6" height="12" rx="3" />
+          <path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" />
+        </svg>
+      </button>
       <button
         type="submit"
         disabled={!text.trim()}

@@ -3,7 +3,7 @@
 import { motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/avatar";
-import { VoicemailPlayer, normaliseLevels } from "@/components/voicemail-player";
+import { AudioPlayer, normaliseLevels } from "@/components/audio-player";
 import { VOICEMAIL_MAX_SECONDS, type CallPeer } from "@/lib/call/types";
 import { formatDuration, profileName } from "@/lib/chat";
 import type { AudioMimeType } from "@/lib/media";
@@ -349,12 +349,13 @@ export function VoicemailRecorder({
           {recording && (
             <div className="flex flex-col gap-4">
               <div className="rounded-2xl bg-white/5 p-3 ring-1 ring-white/10">
-                <VoicemailPlayer
+                <AudioPlayer
                   key={recording.url}
                   src={recording.url}
                   durationSeconds={recording.seconds}
                   bars={recording.bars}
                   tone="dark"
+                  label="voicemail"
                 />
               </div>
 

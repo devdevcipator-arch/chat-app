@@ -151,7 +151,7 @@ export function messageSnippet(type: string, content: string | null, durationSec
     case "image":
       return "📷 Photo";
     case "audio":
-      return "🎤 Voice message";
+      return durationSeconds ? `🎤 Voice message · ${formatDuration(durationSeconds)}` : "🎤 Voice message";
     case "video":
       return "🎬 Video";
     case "file":

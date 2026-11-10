@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { VoicemailPlayer, waveformFromSeed } from "@/components/voicemail-player";
+import { AudioPlayer, waveformFromSeed } from "@/components/audio-player";
 import { formatDuration, formatMessageTime } from "@/lib/chat";
 
 // A voicemail in the chat feed: badge, time and length up top, the custom
@@ -67,12 +67,13 @@ export function VoicemailMessage({
       </div>
 
       {src ? (
-        <VoicemailPlayer
+        <AudioPlayer
           key={src}
           src={src}
           durationSeconds={durationSeconds}
           bars={bars}
           tone={mine ? "accent" : "neutral"}
+          label="voicemail"
           onFirstPlay={unplayed ? onPlayed : undefined}
         />
       ) : (

@@ -1,4 +1,5 @@
 const sizes = {
+  xs: "size-5 text-[9px]",
   sm: "size-9 text-xs",
   md: "size-10 text-sm",
   lg: "size-14 text-lg",

@@ -1,7 +1,8 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AudioPlayer, waveformFromSeed } from "@/components/audio-player";
 
 // --- Image bubble -----------------------------------------------------------
 
@@ -82,15 +83,40 @@ function UploadOverlay({ progress }: { progress?: number }) {
 
 // --- Audio bubble -----------------------------------------------------------
 
-export function AudioMessage({ src, mine }: { src: string | null; mine: boolean }) {
+export function AudioMessage({
+  id,
+  src,
+  durationSeconds,
+  mine,
+  sending,
+  progress,
+}: {
+  id: string;
+  src: string | null;
+  /** Known for recorded voice notes; null for uploaded audio files. */
+  durationSeconds: number | null;
+  mine: boolean;
+  sending: boolean;
+  progress?: number;
+}) {
+  const bars = useMemo(() => waveformFromSeed(id), [id]);
+  const shell = `w-72 max-w-[75vw] rounded-2xl px-3 py-2.5 ${
+    mine ? "rounded-br-md bg-indigo-600 text-white" : "rounded-bl-md bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+  }`;
   if (!src) {
-    return <p className="rounded-2xl bg-zinc-100 px-3.5 py-2 text-xs text-zinc-500 dark:bg-zinc-800">Audio unavailable</p>;
+    return <p className={`${shell} text-xs opacity-70`}>Audio unavailable</p>;
   }
   return (
-    <div className={`rounded-2xl p-1.5 ${mine ? "bg-indigo-600" : "bg-zinc-100 dark:bg-zinc-800"}`}>
-      <audio controls preload="metadata" src={src} className="h-10 w-64 max-w-[70vw]">
-        <track kind="captions" />
-      </audio>
+    <div className={`${shell} ${sending ? "opacity-80" : ""}`}>
+      <AudioPlayer key={src} src={src} durationSeconds={durationSeconds} bars={bars} tone={mine ? "accent" : "neutral"} />
+      {sending && (
+        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/25" aria-hidden>
+          <div
+            className="h-full rounded-full bg-white transition-[width] duration-200"
+            style={{ width: `${Math.round((progress ?? 0) * 100)}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }
