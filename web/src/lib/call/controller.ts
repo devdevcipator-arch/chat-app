@@ -43,6 +43,7 @@ import {
 //   idle ─incoming→ incoming ─accept→ connecting ─peer joined→ active
 //   idle ─startGroup→ group(joining) ─channel joined→ group(live)   (no ringing)
 //   any non-idle ─(hang up | declined | timeout | drop)→ ended ─2.5 s→ idle
+//   outgoing 1-on-1 ─(no answer | declined | busy)→ ended(voicemail offer) ─user→ idle | starting
 
 export type MediaState = {
   muted: boolean;
@@ -331,6 +332,13 @@ export class CallController {
         this.dismiss();
         break;
     }
+  };
+
+  /** From the "unavailable" screen: ring the same person again. */
+  callAgain = () => {
+    const c = this.call;
+    if (c.phase !== "ended" || c.group) return;
+    void this.start(c.peer, c.callType);
   };
 
   dismiss = () => {
@@ -681,6 +689,12 @@ export class CallController {
       return;
     }
     const callType = c.phase === "starting" || c.phase === "group" ? c.callType : callTypeOf(c.call);
+    // Our own ring went unanswered: offer a voicemail instead of closing.
+    const unanswered = reason === "no-answer" || reason === "declined" || reason === "busy";
+    const voicemail =
+      unanswered && (c.phase === "starting" || c.phase === "outgoing")
+        ? { callId: c.phase === "outgoing" ? c.call.id : null }
+        : null;
     const peer =
       c.phase === "group"
         ? { id: c.group.chatId, username: null, displayName: c.group.title, avatarUrl: null, chatId: c.group.chatId }
@@ -693,6 +707,7 @@ export class CallController {
         group: c.phase === "group",
         reason,
         message: message ?? defaultMessage(reason),
+        voicemail,
       },
       {
         cameraOn: false,
@@ -703,7 +718,8 @@ export class CallController {
         videoVersion: this.snapshot.media.videoVersion + 1,
       },
     );
-    this.setTimer("dismiss", ENDED_BANNER_MS, () => this.set({ phase: "idle" }, INITIAL_MEDIA));
+    // The voicemail offer waits for the user; other endings fade out.
+    if (!voicemail) this.setTimer("dismiss", ENDED_BANNER_MS, () => this.set({ phase: "idle" }, INITIAL_MEDIA));
   }
 
   private teardown() {

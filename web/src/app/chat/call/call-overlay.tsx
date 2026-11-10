@@ -1,9 +1,10 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Avatar } from "@/components/avatar";
 import type { CallController, MediaState } from "@/lib/call/controller";
+import type { CallPeer } from "@/lib/call/types";
 import { profileName } from "@/lib/chat";
 import {
   DevicePicker,
@@ -16,11 +17,47 @@ import {
 } from "./call-ui";
 import { useCall } from "./call-provider";
 import { GroupCallScreen, GroupPill } from "./group-call";
-import { ExpandIcon, MicIcon, MicOffIcon, MinimizeIcon, PhoneDownIcon, SettingsIcon } from "./icons";
+import { ExpandIcon, MicIcon, MicOffIcon, MinimizeIcon, PhoneDownIcon, PhoneIcon, SettingsIcon } from "./icons";
 import { VideoCallScreen, VideoPill } from "./video-call";
+import { VoicemailRecorder } from "./voicemail-recorder";
+
+/** Who we are leaving a voicemail for, and the call it follows. */
+type VoicemailTarget = { peer: CallPeer; callId: string | null };
+
+/** The call screen (1-on-1 voice/video or a group room), plus the voicemail recorder. */
+export function CallOverlay() {
+  const { controller } = useCall();
+  const [voicemail, setVoicemail] = useState<VoicemailTarget | null>(null);
+  const closeVoicemail = useCallback(() => setVoicemail(null), []);
+
+  const recordVoicemail = useCallback(
+    (target: VoicemailTarget) => {
+      setVoicemail(target);
+      controller?.dismiss(); // the call screen gives way to the recorder
+    },
+    [controller],
+  );
+
+  return (
+    <>
+      <CallScreens onRecordVoicemail={recordVoicemail} />
+      <AnimatePresence>
+        {voicemail && controller && (
+          <VoicemailRecorder
+            key="voicemail"
+            peer={voicemail.peer}
+            callId={voicemail.callId}
+            meId={controller.meId}
+            onClose={closeVoicemail}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
 
 /** The call screen (1-on-1 voice/video or a group room), minimizable. */
-export function CallOverlay() {
+function CallScreens({ onRecordVoicemail }: { onRecordVoicemail: (target: VoicemailTarget) => void }) {
   const { call, media, controller } = useCall();
   const [minimizedFor, setMinimizedFor] = useState<string | null>(null);
 
@@ -39,15 +76,18 @@ export function CallOverlay() {
   const minimize = () => callKey && setMinimizedFor(callKey);
   const expand = () => setMinimizedFor(null);
 
-  // Escape minimizes rather than hanging up.
+  // Escape minimizes rather than hanging up (and closes the voicemail offer).
+  const offering = shown?.phase === "ended" && !!shown.voicemail;
   useEffect(() => {
     if (!callKey || minimized) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMinimizedFor(callKey);
+      if (e.key !== "Escape") return;
+      if (offering) controller?.dismiss();
+      else setMinimizedFor(callKey);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [callKey, minimized]);
+  }, [callKey, minimized, offering, controller]);
 
   if (!shown || !controller) return <AnimatePresence />;
 
@@ -71,7 +111,7 @@ export function CallOverlay() {
         (video ? (
           <VideoCallScreen key="video-full" {...props} onMinimize={minimize} />
         ) : (
-          <FullScreen key="full" {...props} onMinimize={minimize} />
+          <FullScreen key="full" {...props} onMinimize={minimize} onRecordVoicemail={onRecordVoicemail} />
         ))}
       {minimized &&
         (video ? (
@@ -85,7 +125,108 @@ export function CallOverlay() {
 
 type ViewProps = { call: DirectPhase; media: MediaState; controller: CallController };
 
-function FullScreen({ call, media, controller, onMinimize }: ViewProps & { onMinimize: () => void }) {
+function FullScreen({
+  call,
+  media,
+  controller,
+  onMinimize,
+  onRecordVoicemail,
+}: ViewProps & { onMinimize: () => void; onRecordVoicemail: (target: VoicemailTarget) => void }) {
+  if (call.phase === "ended" && call.voicemail) {
+    const { voicemail } = call;
+    return (
+      <Unavailable
+        call={call}
+        controller={controller}
+        onRecordVoicemail={() => onRecordVoicemail({ peer: call.peer, callId: voicemail.callId })}
+      />
+    );
+  }
+  return <CallScreen call={call} media={media} controller={controller} onMinimize={onMinimize} />;
+}
+
+type EndedPhase = Extract<DirectPhase, { phase: "ended" }>;
+
+/** After an unanswered outgoing call: leave a voicemail, call again, or close. */
+function Unavailable({
+  call,
+  controller,
+  onRecordVoicemail,
+}: {
+  call: EndedPhase;
+  controller: CallController;
+  onRecordVoicemail: () => void;
+}) {
+  const name = profileName(call.peer);
+  return (
+    <motion.div
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="unavailable-title"
+      aria-describedby="unavailable-subtitle"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="fixed inset-0 z-40 flex flex-col bg-gradient-to-b from-zinc-900 via-zinc-950 to-black text-white"
+    >
+      <div className="flex h-16 shrink-0 items-center justify-center px-3">
+        <p className="text-xs font-medium tracking-wide text-white/50 uppercase">
+          {call.callType === "video" ? "Video call" : "Voice call"}
+        </p>
+      </div>
+
+      <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6 text-center">
+        <div className="relative">
+          <span className="absolute -inset-3 rounded-full border border-white/10" aria-hidden />
+          <Avatar name={name} size="xl" />
+        </div>
+        <div className="space-y-2">
+          <h2 id="unavailable-title" className="text-2xl font-semibold">
+            {name} is unavailable
+          </h2>
+          <p className="text-sm text-red-300" aria-live="polite">
+            {call.message}
+          </p>
+          <p id="unavailable-subtitle" className="text-base text-white/70">
+            Would you like to leave a voicemail or call back?
+          </p>
+        </div>
+      </div>
+
+      <div className="shrink-0 px-6 pt-4 pb-[max(2.5rem,env(safe-area-inset-bottom))]">
+        <div className="mx-auto flex max-w-md flex-col gap-3 sm:flex-row-reverse">
+          <button
+            type="button"
+            onClick={onRecordVoicemail}
+            autoFocus
+            className="flex flex-1 items-center justify-center gap-2 rounded-full bg-indigo-600 px-5 py-3 text-sm font-semibold shadow-lg shadow-indigo-600/30 transition hover:bg-indigo-500 active:scale-[0.98]"
+          >
+            <MicIcon className="size-5" />
+            Record Voicemail
+          </button>
+          <button
+            type="button"
+            onClick={controller.callAgain}
+            className="flex flex-1 items-center justify-center gap-2 rounded-full bg-emerald-600 px-5 py-3 text-sm font-semibold transition hover:bg-emerald-500 active:scale-[0.98]"
+          >
+            <PhoneIcon className="size-5" />
+            Call Again
+          </button>
+          <button
+            type="button"
+            onClick={controller.dismiss}
+            className="flex-1 rounded-full bg-white/15 px-5 py-3 text-sm font-medium transition hover:bg-white/25"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function CallScreen({ call, media, controller, onMinimize }: ViewProps & { onMinimize: () => void }) {
   const elapsed = useCallClock(call);
   const name = profileName(call.peer);
   const ringing = call.phase === "starting" || call.phase === "outgoing";

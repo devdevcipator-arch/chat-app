@@ -103,7 +103,7 @@ export function ChatSidebar({
       playMessageSound();
       if (pageIsActive()) return;
       const name = chatName(chat);
-      const snippet = messageSnippet(message.message_type, message.content);
+      const snippet = messageSnippet(message.message_type, message.content, message.duration_seconds);
       showMessageNotification({
         title: chat.type === "group" ? name : (sender ?? name),
         body: chat.type === "group" && sender ? `${sender}: ${snippet}` : snippet,
@@ -140,6 +140,7 @@ export function ChatSidebar({
           senderId: message.sender_id,
           senderName: sender,
           createdAt: message.created_at,
+          durationSeconds: message.duration_seconds,
         },
       };
       setChats((prev) => [updated, ...prev.filter((c) => c.chatId !== message.chat_id)]);
@@ -303,7 +304,7 @@ function ChatRow({ chat, meId, active }: { chat: ChatSummary; meId: string; acti
 
   let snippet = "No messages yet";
   if (last) {
-    const text = messageSnippet(last.type, last.content);
+    const text = messageSnippet(last.type, last.content, last.durationSeconds);
     if (last.type === "system") snippet = text;
     else if (last.senderId === meId) snippet = `You: ${text}`;
     else if (group && last.senderName) snippet = `${last.senderName}: ${text}`;

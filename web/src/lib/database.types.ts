@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.18"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       call_participants: {
@@ -212,33 +237,49 @@ export type Database = {
       }
       messages: {
         Row: {
+          call_id: string | null
           chat_id: string
           content: string | null
           created_at: string
+          duration_seconds: number | null
           id: string
           media_url: string | null
           message_type: string
           sender_id: string | null
+          voicemail_played_at: string | null
         }
         Insert: {
+          call_id?: string | null
           chat_id: string
           content?: string | null
           created_at?: string
+          duration_seconds?: number | null
           id?: string
           media_url?: string | null
           message_type: string
           sender_id?: string | null
+          voicemail_played_at?: string | null
         }
         Update: {
+          call_id?: string | null
           chat_id?: string
           content?: string | null
           created_at?: string
+          duration_seconds?: number | null
           id?: string
           media_url?: string | null
           message_type?: string
           sender_id?: string | null
+          voicemail_played_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "messages_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "calls"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "messages_chat_id_fkey"
             columns: ["chat_id"]
@@ -434,6 +475,7 @@ export type Database = {
           is_muted: boolean
           last_message_at: string
           last_message_content: string
+          last_message_duration_seconds: number
           last_message_sender_id: string
           last_message_sender_name: string
           last_message_type: string
@@ -448,6 +490,7 @@ export type Database = {
         }[]
       }
       mark_chat_read: { Args: { p_chat_id: string }; Returns: undefined }
+      mark_voicemail_played: { Args: { p_message_id: string }; Returns: string }
       remove_group_member: {
         Args: { p_chat_id: string; p_user_id: string }
         Returns: undefined
@@ -615,6 +658,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },

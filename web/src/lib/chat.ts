@@ -42,6 +42,8 @@ export type ChatSummary = {
     senderId: string | null;
     senderName: string | null;
     createdAt: string;
+    /** Voicemail length, for "🎙️ Voicemail · 00:34". */
+    durationSeconds: number | null;
   } | null;
 };
 
@@ -97,6 +99,7 @@ export function toChatSummary(row: ChatRow): ChatSummary {
           senderId: row.last_message_sender_id ?? null,
           senderName: (row.last_message_sender_name as string | null) ?? null,
           createdAt: lastAt,
+          durationSeconds: (row.last_message_duration_seconds as number | null) ?? null,
         }
       : null,
   };
@@ -135,8 +138,16 @@ export function chatName(chat: { type: ChatType; title: string | null; other: Pu
   return chat.type === "group" ? chat.title || "Group" : profileName(chat.other);
 }
 
-export function messageSnippet(type: string, content: string | null) {
+/** Seconds as "MM:SS" (e.g. 34 -> "00:34"). */
+export function formatDuration(totalSeconds: number) {
+  const secs = Math.max(0, Math.floor(totalSeconds));
+  return `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
+}
+
+export function messageSnippet(type: string, content: string | null, durationSeconds?: number | null) {
   switch (type) {
+    case "voicemail":
+      return durationSeconds ? `🎙️ Voicemail · ${formatDuration(durationSeconds)}` : "🎙️ Voicemail";
     case "image":
       return "📷 Photo";
     case "audio":

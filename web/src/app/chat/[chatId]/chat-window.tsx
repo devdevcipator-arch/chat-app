@@ -38,11 +38,13 @@ import {
 } from "@/lib/media";
 import { UploadError, compressImage, requestUploadUrl, uploadToR2 } from "@/lib/media-client";
 import { createClient } from "@/lib/supabase/client";
+import { markVoicemailPlayed } from "@/lib/voicemail-client";
 import { CallButton } from "../call/call-button";
 import { GroupCallBanner } from "../call/group-call-banner";
 import { ChatMenu } from "../chat-menu";
 import { GroupInfo } from "./group-info";
 import { AudioMessage, FileMessage, ImageMessage, Lightbox, VideoMessage } from "./media";
+import { VoicemailMessage } from "./voicemail-message";
 
 type Props = {
   chatId: string;
@@ -122,6 +124,15 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
           setMessages((prev) => mergeMessages(prev, [message]));
           // Group system messages announce renames and membership changes.
           if (message.message_type === "system") void reloadDetails();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "messages", filter: `chat_id=eq.${chatId}` },
+        (payload) => {
+          // e.g. a voicemail was played; only update what we already have.
+          const message = payload.new as MessageRow;
+          setMessages((prev) => (prev.some((m) => m.id === message.id) ? mergeMessages(prev, [message]) : prev));
         },
       )
       .subscribe((status) => {
@@ -206,6 +217,9 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       message_type: "text",
       content,
       media_url: null,
+      duration_seconds: null,
+      call_id: null,
+      voicemail_played_at: null,
       created_at: new Date().toISOString(),
       status: "sending",
     };
@@ -279,6 +293,9 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       message_type: media.kind,
       content: null,
       media_url: null,
+      duration_seconds: null,
+      call_id: null,
+      voicemail_played_at: null,
       created_at: new Date().toISOString(),
       status: "sending",
       localUrl,
@@ -289,6 +306,15 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
     setMessages((prev) => mergeMessages(prev, [optimistic]));
     void sendMedia(optimistic, media);
   }
+
+  /** I listened to a voicemail: show it as played now, record it on the server. */
+  const handleVoicemailPlayed = useCallback(
+    (id: string) => {
+      patch(id, { voicemail_played_at: new Date().toISOString() });
+      void markVoicemailPlayed(supabase, id).then((playedAt) => playedAt && patch(id, { voicemail_played_at: playedAt }));
+    },
+    [supabase, patch],
+  );
 
   function retry(message: ChatMessage) {
     const again: Partial<ChatMessage> = { status: "sending", error: undefined };
@@ -398,6 +424,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
                   }
                   onRetry={() => retry(message)}
                   onOpenImage={setLightbox}
+                  onVoicemailPlayed={handleVoicemailPlayed}
                 />
               ))}
             </AnimatePresence>
@@ -438,6 +465,7 @@ function MessageBubble({
   senderLabel,
   onRetry,
   onOpenImage,
+  onVoicemailPlayed,
 }: {
   message: ChatMessage;
   mine: boolean;
@@ -446,6 +474,7 @@ function MessageBubble({
   senderLabel: string | null;
   onRetry: () => void;
   onOpenImage: (src: string) => void;
+  onVoicemailPlayed: (id: string) => void;
 }) {
   if (message.message_type === "system") {
     return <li className="my-2 text-center text-xs text-zinc-500">{message.content}</li>;
@@ -464,6 +493,20 @@ function MessageBubble({
       break;
     case "video":
       body = <VideoMessage src={mediaSrc} name={message.content} />;
+      break;
+    case "voicemail":
+      body = (
+        <VoicemailMessage
+          id={message.id}
+          src={mediaSrc}
+          durationSeconds={message.duration_seconds ?? 0}
+          createdAt={message.created_at}
+          playedAt={message.voicemail_played_at}
+          mine={mine}
+          sending={sending}
+          onPlayed={() => onVoicemailPlayed(message.id)}
+        />
+      );
       break;
     case "file":
       body = <FileMessage src={mediaSrc} name={message.content} mine={mine} />;
@@ -511,7 +554,7 @@ function MessageBubble({
             </>
           ) : sending ? (
             <span>{message.message_type === "text" ? "Sending…" : "Uploading…"}</span>
-          ) : (
+          ) : message.message_type === "voicemail" ? null : (
             <time suppressHydrationWarning dateTime={message.created_at}>
               {formatMessageTime(message.created_at)}
             </time>

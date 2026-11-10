@@ -70,12 +70,20 @@ export type CallPhase =
       group: boolean;
       reason: CallEndReason;
       message: string;
+      /**
+       * Our outgoing 1-on-1 call wasn't answered (no answer, declined or busy):
+       * the ended screen stays up and offers a voicemail or a call back.
+       */
+      voicemail: { callId: string | null } | null;
     };
 
 /** Agora channel names are `call_<chatId>`. */
 export const callChannelName = (chatId: string) => `call_${chatId}`;
 export const CALL_CHANNEL_PATTERN =
   /^call_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+/** Longest voicemail recording (the database enforces 1–120 s). */
+export const VOICEMAIL_MAX_SECONDS = 120;
 
 /** How long an outgoing call rings before it counts as missed. */
 export const RING_TIMEOUT_MS = 30_000;
