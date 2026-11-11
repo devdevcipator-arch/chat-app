@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { Spinner } from "@/components/auth-card";
 import { Avatar } from "@/components/avatar";
+import { ESCAPE_LAYER } from "@/lib/escape";
 import { ConfirmDialog, Dialog } from "@/components/dialog";
 import { Menu } from "@/components/menu";
 import {
@@ -61,6 +62,7 @@ export function GroupInfo({
             exit={{ x: "100%" }}
             transition={{ type: "spring", stiffness: 400, damping: 40 }}
             aria-label="Group info"
+            {...ESCAPE_LAYER}
             className="fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-zinc-200 bg-white shadow-2xl md:w-96 dark:border-zinc-800 dark:bg-zinc-950"
           >
             <Panel details={details} meId={meId} onClose={onClose} />

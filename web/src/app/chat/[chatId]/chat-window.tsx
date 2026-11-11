@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -39,6 +40,7 @@ import {
   type MediaMimeType,
 } from "@/lib/media";
 import { UploadError, compressImage, requestUploadUrl, uploadToR2 } from "@/lib/media-client";
+import { ESCAPE_LAYER, escapeIsTaken } from "@/lib/escape";
 import { EditError, editMessage } from "@/lib/message-edit";
 import { createClient } from "@/lib/supabase/client";
 import { formatBytes } from "@/lib/vault";
@@ -385,6 +387,24 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
   }
 
   const cancelEdit = useCallback(() => setEditing(null), []);
+
+  // Escape, in priority order: (1) anything open on top (dialogs, lightbox,
+  // menus, Group Info, call screen, recorder...) handles it itself; (2) stop
+  // editing a message; (3) leave the chat for the "No chat selected" view.
+  // Captured on window so it runs before those layers react and close. Calls
+  // live in the /chat layout, so leaving the chat doesn't touch them.
+  const router = useRouter();
+  const editingNow = editing !== null;
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape" || e.isComposing || e.defaultPrevented || escapeIsTaken()) return;
+      e.preventDefault();
+      if (editingNow) setEditing(null);
+      else router.push("/chat");
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  }, [editingNow, router]);
 
   /** Shows the new text right away; Postgres has the final say (10-minute rule). */
   async function saveEdit(content: string) {
@@ -980,6 +1000,7 @@ function Composer({
             <div
               role="group"
               aria-label="Pasted images ready to send"
+              {...ESCAPE_LAYER /* Escape discards the images, not the chat */}
               className="mx-3 mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-900/60"
             >
               <div className="mb-2 flex items-center gap-2 px-1">

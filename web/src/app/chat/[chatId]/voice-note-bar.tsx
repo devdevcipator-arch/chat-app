@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioRecorder, RecorderError, type RecordedAudio } from "@/lib/audio-recorder";
 import { formatDuration } from "@/lib/chat";
+import { ESCAPE_LAYER } from "@/lib/escape";
 
 // The composer in "recording mode": trash on the left, then a red pulsing
 // dot, pause/resume, timer and live level meter, and send on the right.
@@ -149,6 +150,7 @@ export function VoiceNoteBar({
       className="flex min-h-10 flex-1 items-center gap-2"
       role="group"
       aria-label={isPaused ? "Voice message recording paused" : "Recording voice message"}
+      {...ESCAPE_LAYER /* Escape discards the recording, not the chat */}
     >
       <button
         type="button"
