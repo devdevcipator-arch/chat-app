@@ -55,6 +55,12 @@ export class AudioRecorder {
   private raf = 0;
   private context: AudioContext | null = null;
   private done = false;
+  /** When the current pause began (null while recording). */
+  private pausedAt: number | null = null;
+  /** Total ms spent paused, left out of the duration. */
+  private pausedMs = 0;
+  /** Restarts the level meter loop after a resume (null without a meter). */
+  private runMeter: (() => void) | null = null;
   readonly levels: number[] = [];
 
   private constructor(
@@ -94,11 +100,36 @@ export class AudioRecorder {
     }
   }
 
+  /** Recorded time so far, excluding pauses. */
   get elapsedSeconds() {
-    return (performance.now() - this.startedAt) / 1000;
+    const now = this.pausedAt ?? performance.now();
+    return Math.max(0, now - this.startedAt - this.pausedMs) / 1000;
   }
 
-  /** Stops and returns the recording (resolves once the last chunk is in). */
+  get paused() {
+    return this.pausedAt !== null;
+  }
+
+  /** Pauses capture, the clock and the level meter. Returns whether it paused. */
+  pause(): boolean {
+    if (this.done || this.recorder.state !== "recording") return false;
+    this.recorder.pause();
+    this.pausedAt = performance.now();
+    cancelAnimationFrame(this.raf);
+    return true;
+  }
+
+  /** Picks up where pause() left off. Returns whether it resumed. */
+  resume(): boolean {
+    if (this.done || this.recorder.state !== "paused" || this.pausedAt === null) return false;
+    this.recorder.resume();
+    this.pausedMs += performance.now() - this.pausedAt;
+    this.pausedAt = null;
+    this.runMeter?.();
+    return true;
+  }
+
+  /** Stops and returns the recording (also works while paused). */
   stop(): Promise<RecordedAudio> {
     const seconds = this.elapsedSeconds;
     return new Promise((resolve) => {
@@ -143,7 +174,7 @@ export class AudioRecorder {
     const samples = new Uint8Array(analyser.fftSize);
     let last = 0;
     const tick = (now: number) => {
-      if (this.done) return;
+      if (this.done || this.pausedAt !== null) return; // frozen while paused
       analyser.getByteTimeDomainData(samples);
       let sum = 0;
       for (const v of samples) sum += ((v - 128) / 128) ** 2;
@@ -155,6 +186,10 @@ export class AudioRecorder {
       }
       this.raf = requestAnimationFrame(tick);
     };
-    this.raf = requestAnimationFrame(tick);
+    this.runMeter = () => {
+      cancelAnimationFrame(this.raf);
+      this.raf = requestAnimationFrame(tick);
+    };
+    this.runMeter();
   }
 }
