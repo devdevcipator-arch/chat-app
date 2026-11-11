@@ -8,6 +8,7 @@ import { UploadError } from "@/lib/media-client";
 import { createClient } from "@/lib/supabase/client";
 import type { GalleryItem } from "@/lib/vault";
 import { forwardGalleryItem } from "@/lib/vault-client";
+import { CheckIcon } from "./icons";
 
 export function ForwardDialog({
   item,
@@ -41,8 +42,11 @@ function ForwardPanel({
   onSent: (chat: ChatSummary) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [sendingTo, setSendingTo] = useState<string | null>(null);
+  /** Picking a chat only selects it; nothing is sent until "Send" is pressed. */
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const selected = chats.find((c) => c.chatId === selectedChatId) ?? null;
 
   // Refresh the list in the background: new chats may exist since page load.
   useEffect(() => {
@@ -64,16 +68,16 @@ function ForwardPanel({
       )
     : chats;
 
-  async function send(chat: ChatSummary) {
-    if (sendingTo) return;
-    setSendingTo(chat.chatId);
+  async function send() {
+    if (!selected || sending) return;
+    setSending(true);
     setError(null);
     try {
-      await forwardGalleryItem(item.id, chat.chatId);
-      onSent(chat);
+      await forwardGalleryItem(item.id, selected.chatId);
+      onSent(selected); // closes the dialog, which also resets the selection
     } catch (e) {
       setError(e instanceof UploadError ? e.message : "Couldn't send. Please try again.");
-      setSendingTo(null);
+      setSending(false);
     }
   }
 
@@ -92,7 +96,7 @@ function ForwardPanel({
           {error}
         </p>
       )}
-      <ul className="mt-3 -mx-2 min-h-0 flex-1 overflow-y-auto">
+      <ul role="radiogroup" aria-label="Chats" className="mt-3 -mx-2 min-h-0 flex-1 space-y-0.5 overflow-y-auto">
         {visible.length === 0 ? (
           <li className="px-2 py-6 text-center text-sm text-zinc-500">
             {chats.length === 0 ? "You don't have any chats yet." : "No chats match your search."}
@@ -101,14 +105,23 @@ function ForwardPanel({
           visible.map((chat) => {
             const name = chatName(chat);
             const group = chat.type === "group";
-            const busy = sendingTo === chat.chatId;
+            const isSelected = chat.chatId === selectedChatId;
             return (
               <li key={chat.chatId}>
                 <button
                   type="button"
-                  onClick={() => send(chat)}
-                  disabled={!!sendingTo}
-                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition hover:bg-zinc-100 disabled:cursor-default disabled:hover:bg-transparent dark:hover:bg-zinc-800"
+                  role="radio"
+                  aria-checked={isSelected}
+                  onClick={() => {
+                    setSelectedChatId(chat.chatId);
+                    setError(null);
+                  }}
+                  disabled={sending}
+                  className={`flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left ring-inset transition disabled:cursor-default ${
+                    isSelected
+                      ? "bg-indigo-50 ring-2 ring-indigo-500 dark:bg-indigo-950/50"
+                      : "hover:bg-zinc-100 disabled:hover:bg-transparent dark:hover:bg-zinc-800"
+                  }`}
                 >
                   <Avatar name={name} group={group} size="sm" />
                   <span className="min-w-0 flex-1">
@@ -118,11 +131,12 @@ function ForwardPanel({
                     </span>
                   </span>
                   <span
-                    className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
-                      busy ? "bg-indigo-600 text-white" : "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+                    aria-hidden
+                    className={`flex size-5 shrink-0 items-center justify-center rounded-full border-2 transition ${
+                      isSelected ? "border-indigo-600 bg-indigo-600 text-white" : "border-zinc-300 dark:border-zinc-600"
                     }`}
                   >
-                    {busy ? "Sending…" : "Send"}
+                    {isSelected && <CheckIcon className="size-3" />}
                   </span>
                 </button>
               </li>
@@ -130,6 +144,28 @@ function ForwardPanel({
           })
         )}
       </ul>
+
+      <div className="-mx-1 mt-3 flex items-center justify-end gap-2 border-t border-zinc-200 px-1 pt-3 dark:border-zinc-800">
+        {!selected && <p className="mr-auto text-xs text-zinc-500">Choose a chat to forward to.</p>}
+        <button
+          type="button"
+          onClick={() => void send()}
+          disabled={!selected || sending}
+          aria-busy={sending || undefined}
+          className="inline-flex min-w-0 items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {sending ? (
+            <span className="size-4 shrink-0 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden />
+          ) : (
+            <svg viewBox="0 0 24 24" fill="currentColor" className="size-4 shrink-0" aria-hidden>
+              <path d="M3.4 20.4 21 12 3.4 3.6l-.01 6.53L15 12l-11.61 1.87z" />
+            </svg>
+          )}
+          <span className="truncate">
+            {sending ? "Sending…" : selected ? `Send to ${chatName(selected)}` : "Send"}
+          </span>
+        </button>
+      </div>
     </>
   );
 }

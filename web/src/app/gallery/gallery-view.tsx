@@ -160,7 +160,7 @@ export function GalleryView({
   const onSent = useCallback(
     (chat: ChatSummary) => {
       setForwarding(null);
-      push({ tone: "success", text: `Sent to ${chatName(chat)}`, action: { label: "Open chat", href: `/chat/${chat.chatId}` } });
+      push({ tone: "success", text: `Forwarded to ${chatName(chat)}`, action: { label: "Open chat", href: `/chat/${chat.chatId}` } });
     },
     [push],
   );
