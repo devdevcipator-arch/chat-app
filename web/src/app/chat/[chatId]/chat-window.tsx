@@ -47,6 +47,7 @@ import { CallButton } from "../call/call-button";
 import { GroupCallBanner } from "../call/group-call-banner";
 import { ChatMenu } from "../chat-menu";
 import { AttachMenu } from "./attach-menu";
+import { GalleryPicker } from "./gallery-picker";
 import { GroupInfo } from "./group-info";
 import { AudioMessage, FileMessage, ImageMessage, Lightbox, VideoMessage } from "./media";
 import { VOICE_NOTE_MAX_SECONDS, VoiceNoteBar } from "./voice-note-bar";
@@ -94,6 +95,8 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const closeLightbox = useCallback(() => setLightbox(null), []);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const closeGallery = useCallback(() => setGalleryOpen(false), []);
   /** The message being edited in the composer, if any. */
   const [editing, setEditing] = useState<ChatMessage | null>(null);
 
@@ -578,11 +581,23 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
         onSend={handleSendText}
         onAttach={(file) => void handleAttach(file)}
         onSendImages={(files, caption) => void handleSendImages(files, caption)}
+        onOpenGallery={() => setGalleryOpen(true)}
         onVoiceNote={handleVoiceNote}
         onNotice={setNotice}
         editing={editing && { id: editing.id, content: editing.content ?? "" }}
         onSaveEdit={(content) => void saveEdit(content)}
         onCancelEdit={cancelEdit}
+      />
+      <GalleryPicker
+        open={galleryOpen}
+        chatId={chatId}
+        onClose={closeGallery}
+        onSent={(rows, error) => {
+          setGalleryOpen(false);
+          stickToBottom.current = true;
+          if (rows.length) setMessages((prev) => mergeMessages(prev, rows));
+          setNotice(error && (rows.length ? `Some items weren't sent: ${error}` : error));
+        }}
       />
       <Lightbox src={lightbox} onClose={closeLightbox} />
       {group && <GroupInfo open={infoOpen} onClose={closeInfo} meId={meId} details={details} />}
@@ -803,6 +818,7 @@ function Composer({
   onSend,
   onAttach,
   onSendImages,
+  onOpenGallery,
   onVoiceNote,
   onNotice,
   editing,
@@ -813,6 +829,8 @@ function Composer({
   onAttach: (file: File) => void;
   /** Pasted images, with the typed text as their caption. */
   onSendImages: (files: File[], caption: string) => void;
+  /** "Photos & Videos": pick from the in-app Gallery. */
+  onOpenGallery: () => void;
   onVoiceNote: (audio: RecordedAudio) => void;
   onNotice: (message: string) => void;
   /** Editing mode: the message whose text is in the input. */
@@ -1068,7 +1086,7 @@ function Composer({
       </AnimatePresence>
 
       <form onSubmit={submit} className="flex items-end gap-2 p-3">
-        {!editing && <AttachMenu onFiles={(files) => files.forEach(onAttach)} />}
+        {!editing && <AttachMenu onFiles={(files) => files.forEach(onAttach)} onOpenGallery={onOpenGallery} />}
         <textarea
           ref={input}
           value={text}

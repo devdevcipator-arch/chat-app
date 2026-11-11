@@ -2,21 +2,20 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
-import { DEVICE_FILES_ACCEPT, GALLERY_ACCEPT } from "@/lib/chat-upload";
+import { DEVICE_FILES_ACCEPT } from "@/lib/chat-upload";
 
 const MAX_FILES = 10;
 
 /**
- * The composer's 📎 button: a small menu to pick from the photo library
- * (photos & videos) or from the device's files (documents and the rest).
- * Picked files go to `onFiles`, which runs them through the normal upload.
+ * The composer's 📎 button: a small menu to pick photos & videos from your
+ * in-app Gallery (`onOpenGallery`), or files from the device (documents and
+ * the rest), which go to `onFiles` and through the normal upload.
  */
-export function AttachMenu({ onFiles }: { onFiles: (files: File[]) => void }) {
+export function AttachMenu({ onFiles, onOpenGallery }: { onFiles: (files: File[]) => void; onOpenGallery: () => void }) {
   const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
-  const galleryInput = useRef<HTMLInputElement>(null);
   const filesInput = useRef<HTMLInputElement>(null);
 
   const close = (refocus = false) => {
@@ -69,7 +68,6 @@ export function AttachMenu({ onFiles }: { onFiles: (files: File[]) => void }) {
 
   return (
     <div ref={root} className="relative shrink-0">
-      <input ref={galleryInput} type="file" accept={GALLERY_ACCEPT} multiple onChange={handleFiles} className="hidden" tabIndex={-1} aria-hidden />
       <input ref={filesInput} type="file" accept={DEVICE_FILES_ACCEPT} multiple onChange={handleFiles} className="hidden" tabIndex={-1} aria-hidden />
 
       <button
@@ -112,9 +110,12 @@ export function AttachMenu({ onFiles }: { onFiles: (files: File[]) => void }) {
             className="absolute bottom-full left-0 z-50 mb-3 flex min-w-[220px] flex-col gap-1 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
           >
             <MenuItem
-              onSelect={() => pick(galleryInput.current)}
+              onSelect={() => {
+                close();
+                onOpenGallery();
+              }}
               label="Photos & Videos"
-              hint="From your gallery"
+              hint="From My Gallery"
               tint="bg-violet-100 text-violet-600 dark:bg-violet-950/70 dark:text-violet-300"
               icon={
                 <>
@@ -127,7 +128,7 @@ export function AttachMenu({ onFiles }: { onFiles: (files: File[]) => void }) {
             <MenuItem
               onSelect={() => pick(filesInput.current)}
               label="Device Files"
-              hint="PDF, Word, Excel, ZIP…"
+              hint="Photos, videos, PDF, Word, ZIP…"
               tint="bg-sky-100 text-sky-600 dark:bg-sky-950/70 dark:text-sky-300"
               icon={
                 <>

@@ -37,9 +37,6 @@ export function resolveChatFileType(file: { name: string; type: string }): Vault
 const extensionsOf = (kinds: string[]) =>
   [...new Set(Object.values(VAULT_TYPES).filter((t) => kinds.includes(t.kind)).map((t) => `.${t.ext}`))];
 
-/** "Photos & Videos": opens the photo library on phones. */
-export const GALLERY_ACCEPT = "image/*,video/*";
-
 /** "Device Files": documents plus anything else we can send (opens the file browser). */
 export const DEVICE_FILES_ACCEPT = [
   ...extensionsOf(["document", "audio", "video", "image"]),
