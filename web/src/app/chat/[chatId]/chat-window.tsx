@@ -41,6 +41,7 @@ import {
 import { UploadError, compressImage, requestUploadUrl, uploadToR2 } from "@/lib/media-client";
 import { EditError, editMessage } from "@/lib/message-edit";
 import { createClient } from "@/lib/supabase/client";
+import { formatBytes } from "@/lib/vault";
 import { markVoicemailPlayed } from "@/lib/voicemail-client";
 import { CallButton } from "../call/call-button";
 import { GroupCallBanner } from "../call/group-call-banner";
@@ -67,6 +68,8 @@ type PreparedMedia = {
   fileName: string;
   /** Recorded voice notes know their length. */
   durationSeconds?: number;
+  /** Text sent with an image (pasted screenshots). */
+  caption?: string;
 };
 
 const errorText = (e: unknown) =>
@@ -300,6 +303,27 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
     queueMedia(media);
   }
 
+  /**
+   * Images pasted into the composer (screenshots etc.): each one goes through
+   * the normal pipeline; the caption rides on the last image.
+   */
+  async function handleSendImages(files: File[], caption: string) {
+    setNotice(null);
+    const prepared: PreparedMedia[] = [];
+    for (const file of files) {
+      try {
+        prepared.push(await prepare(file));
+      } catch (e) {
+        setNotice(errorText(e));
+      }
+    }
+    if (prepared.length === 0) {
+      if (caption) handleSendText(caption); // don't lose what they typed
+      return;
+    }
+    prepared.forEach((media, i) => queueMedia(i === prepared.length - 1 && caption ? { ...media, caption } : media));
+  }
+
   /** A voice note from the composer: same upload pipeline, plus its length. */
   function handleVoiceNote(audio: RecordedAudio) {
     setNotice(null);
@@ -325,7 +349,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       chat_id: chatId,
       sender_id: meId,
       message_type: media.kind,
-      content: null,
+      content: media.caption || null,
       media_url: null,
       duration_seconds: media.durationSeconds ?? null,
       call_id: null,
@@ -521,6 +545,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       <Composer
         onSend={handleSendText}
         onAttach={(file) => void handleAttach(file)}
+        onSendImages={(files, caption) => void handleSendImages(files, caption)}
         onVoiceNote={handleVoiceNote}
         onNotice={setNotice}
         editing={editing && { id: editing.id, content: editing.content ?? "" }}
@@ -570,7 +595,22 @@ function MessageBubble({
   let body;
   switch (message.message_type) {
     case "image":
-      body = <ImageMessage src={mediaSrc} progress={message.progress} sending={sending} onOpen={onOpenImage} />;
+      body = (
+        <div className={`flex flex-col gap-1 ${mine ? "items-end" : "items-start"}`}>
+          <ImageMessage src={mediaSrc} progress={message.progress} sending={sending} onOpen={onOpenImage} />
+          {message.content && (
+            <div
+              className={`max-w-[min(18rem,70vw)] rounded-2xl px-3.5 py-2 text-[15px] leading-snug break-words whitespace-pre-wrap ${
+                mine
+                  ? "rounded-tr-md bg-indigo-600 text-white"
+                  : "rounded-tl-md bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+              } ${sending ? "opacity-70" : ""}`}
+            >
+              {message.content}
+            </div>
+          )}
+        </div>
+      );
       break;
     case "audio":
       body = (
@@ -704,9 +744,27 @@ function useEditWindowOpen(createdAt: string, enabled: boolean) {
   return enabled && open;
 }
 
+/** An image pasted from the clipboard, waiting in the composer to be sent. */
+type StagedImage = { id: string; file: File; url: string };
+
+const MAX_STAGED_IMAGES = 10;
+
+/** "PNG · 420 KB" */
+const imageBadge = (file: File) =>
+  `${(file.type.split("/")[1] ?? "image").toUpperCase()} · ${formatBytes(file.size)}`;
+
+/** Screenshots paste as "image.png"; give them a name worth keeping. */
+function namePasted(file: File) {
+  if (file.name && file.name !== "image.png" && file.name !== "image") return file;
+  const ext = file.type.split("/")[1] ?? "png";
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+  return new File([file], `screenshot-${stamp}.${ext}`, { type: file.type, lastModified: file.lastModified });
+}
+
 function Composer({
   onSend,
   onAttach,
+  onSendImages,
   onVoiceNote,
   onNotice,
   editing,
@@ -715,6 +773,8 @@ function Composer({
 }: {
   onSend: (content: string) => void;
   onAttach: (file: File) => void;
+  /** Pasted images, with the typed text as their caption. */
+  onSendImages: (files: File[], caption: string) => void;
   onVoiceNote: (audio: RecordedAudio) => void;
   onNotice: (message: string) => void;
   /** Editing mode: the message whose text is in the input. */
@@ -760,13 +820,86 @@ function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [text, recording]);
 
+  // --- Pasted images ----------------------------------------------------------
+
+  const [staged, setStaged] = useState<StagedImage[]>([]);
+  const showStaged = staged.length > 0 && !editing;
+
+  function stageImages(files: File[]) {
+    const accepted = files.filter((f) => ACCEPTED_IMAGE_INPUTS.includes(f.type));
+    if (accepted.length < files.length) onNotice("Only JPEG, PNG, WebP, GIF and AVIF images can be pasted.");
+    const room = MAX_STAGED_IMAGES - staged.length;
+    if (accepted.length > room) onNotice(`You can send up to ${MAX_STAGED_IMAGES} images at once.`);
+    const added = accepted.slice(0, Math.max(0, room)).map((file) => {
+      const named = namePasted(file);
+      return { id: crypto.randomUUID(), file: named, url: URL.createObjectURL(named) };
+    });
+    if (added.length === 0) return;
+    setStaged((prev) => [...prev, ...added]); // another paste queues behind the first
+    input.current?.focus();
+  }
+
+  function unstage(id?: string) {
+    setStaged((prev) => {
+      const [gone, kept] = id ? [prev.filter((s) => s.id === id), prev.filter((s) => s.id !== id)] : [prev, []];
+      gone.forEach((s) => URL.revokeObjectURL(s.url));
+      return kept;
+    });
+  }
+
+  // Release previews when leaving the chat.
+  const stagedRef = useRef(staged);
+  useEffect(() => {
+    stagedRef.current = staged;
+  });
+  useEffect(() => () => stagedRef.current.forEach((s) => URL.revokeObjectURL(s.url)), []);
+
+  // Paste anywhere in the chat (the input or the conversation itself). Only
+  // image-only clipboards are intercepted; anything with text pastes as text,
+  // untouched (newlines, tabs, code) — including Office copies that also
+  // carry a picture of the selection.
+  const stageRef = useRef(stageImages);
+  useEffect(() => {
+    stageRef.current = stageImages;
+  });
+  useEffect(() => {
+    if (editingId || recording) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      const otherField =
+        target &&
+        target !== input.current &&
+        (target.isContentEditable ||
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement ||
+          target.closest("[role=dialog]"));
+      const data = e.clipboardData;
+      if (otherField || !data || data.getData("text/plain").trim()) return;
+      const files = Array.from(data.items)
+        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => !!file);
+      if (files.length === 0) return;
+      e.preventDefault();
+      stageRef.current(files);
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [editingId, recording]);
+
   function submit(e?: FormEvent) {
     e?.preventDefault();
     const content = text.trim();
-    if (!content) return;
     if (editing) {
-      onSaveEdit(content); // the text swap above restores the draft
-    } else {
+      if (content) onSaveEdit(content); // the text swap above restores the draft
+    } else if (staged.length > 0) {
+      onSendImages(
+        staged.map((s) => s.file),
+        content,
+      );
+      unstage();
+      setText("");
+    } else if (content) {
       onSend(content);
       setText("");
     }
@@ -780,6 +913,9 @@ function Composer({
     } else if (e.key === "Escape" && editing) {
       e.preventDefault();
       onCancelEdit();
+    } else if (e.key === "Escape" && showStaged) {
+      e.preventDefault();
+      unstage();
     }
   }
 
@@ -828,6 +964,75 @@ function Composer({
             </div>
           </motion.div>
         )}
+        {showStaged && (
+          <motion.div
+            key="staged"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.15 }}
+            className="overflow-hidden"
+          >
+            <div
+              role="group"
+              aria-label="Pasted images ready to send"
+              className="mx-3 mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-900/60"
+            >
+              <div className="mb-2 flex items-center gap-2 px-1">
+                <p className="min-w-0 flex-1 truncate text-xs text-zinc-500">
+                  <span className="font-semibold text-zinc-700 dark:text-zinc-200">
+                    {staged.length === 1 ? "1 image" : `${staged.length} images`} ready to send
+                  </span>{" "}
+                  · add a caption below, Enter to send, Esc to discard
+                </p>
+                <button
+                  type="button"
+                  onClick={() => unstage()}
+                  aria-label="Discard pasted images"
+                  title="Discard"
+                  className="flex size-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/50 dark:hover:text-red-400"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className="size-[18px]" aria-hidden>
+                    <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />
+                  </svg>
+                </button>
+              </div>
+              <ul className="flex gap-2 overflow-x-auto pb-1">
+                <AnimatePresence initial={false}>
+                  {staged.map((s) => (
+                    <motion.li
+                      key={s.id}
+                      layout
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      className="relative size-24 shrink-0 overflow-hidden rounded-lg bg-zinc-200 dark:bg-zinc-800"
+                    >
+                      {/* Local object URL preview; next/image can't optimise blobs. */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={s.url} alt={s.file.name} className="size-full object-cover" />
+                      <span className="absolute inset-x-1 bottom-1 truncate rounded bg-black/65 px-1 py-0.5 text-center text-[10px] font-medium text-white tabular-nums">
+                        {imageBadge(s.file)}
+                      </span>
+                      {staged.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => unstage(s.id)}
+                          aria-label={`Remove ${s.file.name}`}
+                          className="absolute top-1 right-1 flex size-6 items-center justify-center rounded-full bg-black/60 text-white transition hover:bg-black/80"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" className="size-3" aria-hidden>
+                            <path d="M6 6l12 12M18 6L6 18" />
+                          </svg>
+                        </button>
+                      )}
+                    </motion.li>
+                  ))}
+                </AnimatePresence>
+              </ul>
+            </div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       <form onSubmit={submit} className="flex items-end gap-2 p-3">
@@ -865,12 +1070,12 @@ function Composer({
           onKeyDown={handleKeyDown}
           rows={1}
           maxLength={MESSAGE_MAX}
-          placeholder={editing ? "Edit message" : "Message"}
-          aria-label={editing ? "Edit message" : "Message"}
+          placeholder={editing ? "Edit message" : showStaged ? "Add a caption…" : "Message"}
+          aria-label={editing ? "Edit message" : showStaged ? "Caption" : "Message"}
           autoFocus
           className="max-h-40 min-h-10 flex-1 resize-none rounded-2xl border border-zinc-300 bg-white px-4 py-2 text-[15px] outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-900"
         />
-        {!editing && (
+        {!editing && !showStaged && (
           <button
             type="button"
             onClick={() => setRecording(true)}
@@ -886,8 +1091,8 @@ function Composer({
         )}
         <button
           type="submit"
-          disabled={!text.trim()}
-          aria-label={editing ? "Save edit" : "Send message"}
+          disabled={!text.trim() && !showStaged}
+          aria-label={editing ? "Save edit" : showStaged ? `Send ${staged.length === 1 ? "image" : `${staged.length} images`}` : "Send message"}
           title={editing ? "Save edit" : undefined}
           className="flex size-10 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white transition hover:bg-indigo-500 disabled:opacity-40"
         >
