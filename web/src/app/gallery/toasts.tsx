@@ -9,10 +9,14 @@ export type Toast = {
   id: number;
   tone: "success" | "error";
   text: string;
-  action?: { label: string; href: string };
+  /** A link, or a button (e.g. "Retry") that also dismisses the toast. */
+  action?: { label: string; href: string } | { label: string; onClick: () => void };
 };
 
 const TOAST_MS = 4500;
+/** Toasts you can act on stay up longer. */
+const ACTION_TOAST_MS = 8000;
+const ACTION_CLASS = "shrink-0 font-semibold text-indigo-300 hover:underline dark:text-indigo-600";
 
 export function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -31,7 +35,7 @@ export function useToasts() {
       setToasts((prev) => [...prev.slice(-3), { ...toast, id }]);
       timers.current.set(
         id,
-        setTimeout(() => dismiss(id), TOAST_MS),
+        setTimeout(() => dismiss(id), toast.action ? ACTION_TOAST_MS : TOAST_MS),
       );
     },
     [dismiss],
@@ -71,14 +75,23 @@ export function Toasts({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id:
               {toast.tone === "success" ? <CheckIcon className="size-3.5" /> : <AlertIcon className="size-3.5" />}
             </span>
             <p className="min-w-0 flex-1">{toast.text}</p>
-            {toast.action && (
-              <Link
-                href={toast.action.href}
-                className="shrink-0 font-semibold text-indigo-300 hover:underline dark:text-indigo-600"
-              >
-                {toast.action.label}
-              </Link>
-            )}
+            {toast.action &&
+              ("href" in toast.action ? (
+                <Link href={toast.action.href} className={ACTION_CLASS}>
+                  {toast.action.label}
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDismiss(toast.id);
+                    (toast.action as { onClick: () => void }).onClick();
+                  }}
+                  className={ACTION_CLASS}
+                >
+                  {toast.action.label}
+                </button>
+              ))}
             <button
               type="button"
               onClick={() => onDismiss(toast.id)}

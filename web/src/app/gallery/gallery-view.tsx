@@ -46,7 +46,6 @@ export function GalleryView({
   const [forwarding, setForwarding] = useState<GalleryItem | null>(null);
   const [deleting, setDeleting] = useState<GalleryItem | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -134,31 +133,27 @@ export function GalleryView({
   const openPicker = () => fileInput.current?.click();
 
   function askDelete(item: GalleryItem) {
-    setDeleteError(null);
-    setDeleting(item);
+    if (!deleteBusy) setDeleting(item);
   }
 
-  async function confirmDelete() {
-    if (!deleting) return;
+  /** Permanent: the server purges the R2 file, then hard-deletes the row. */
+  async function deleteItem(item: GalleryItem) {
+    setDeleting(item); // keeps the dialog up with its spinner (also on Retry)
     setDeleteBusy(true);
-    setDeleteError(null);
     try {
-      await deleteGalleryItem(deleting.id);
-      const removedAt = items.findIndex((i) => i.id === deleting.id);
-      const next = items.filter((i) => i.id !== deleting.id);
-      setItems(next);
-      // Keep the viewer on a sensible neighbour (or close it).
-      if (viewing !== null) {
-        if (next.length === 0) setViewing(null);
-        else if (removedAt !== -1 && removedAt < viewing) setViewing(viewing - 1);
-        else setViewing(Math.min(viewing, next.length - 1));
-      }
-      setDeleting(null);
-      push({ tone: "success", text: "Deleted from your gallery" });
+      await deleteGalleryItem(item.id);
+      setItems((prev) => prev.filter((i) => i.id !== item.id));
+      setViewing(null); // close the full-screen viewer (it animates out)
+      push({ tone: "success", text: "Item permanently deleted" });
     } catch (e) {
-      setDeleteError(errorText(e));
+      push({
+        tone: "error",
+        text: errorText(e),
+        action: { label: "Retry", onClick: () => void deleteItem(item) },
+      });
     } finally {
       setDeleteBusy(false);
+      setDeleting(null);
     }
   }
 
@@ -266,13 +261,13 @@ export function GalleryView({
 
       <ConfirmDialog
         open={!!deleting}
-        title="Delete from gallery?"
-        description={`"${deleting?.fileName ?? ""}" will be permanently removed from your gallery. Copies you've already sent to chats stay there.`}
-        confirmLabel="Delete"
+        title="Permanently delete item?"
+        description="This will permanently delete this file from your personal vault and cloud storage. This action cannot be undone."
+        confirmLabel="Delete Permanently"
         danger
         busy={deleteBusy}
-        error={deleteError}
-        onConfirm={confirmDelete}
+        busyLabel="Deleting…"
+        onConfirm={() => deleting && void deleteItem(deleting)}
         onClose={() => !deleteBusy && setDeleting(null)}
       />
 

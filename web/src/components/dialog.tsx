@@ -68,6 +68,7 @@ export function ConfirmDialog({
   confirmLabel,
   danger,
   busy,
+  busyLabel = "Working…",
   error,
   onConfirm,
   onClose,
@@ -78,6 +79,8 @@ export function ConfirmDialog({
   confirmLabel: string;
   danger?: boolean;
   busy?: boolean;
+  /** Shown next to a spinner while busy. */
+  busyLabel?: string;
   error?: string | null;
   onConfirm: () => void;
   onClose: () => void;
@@ -102,11 +105,19 @@ export function ConfirmDialog({
           onClick={onConfirm}
           disabled={busy}
           autoFocus
-          className={`rounded-lg px-3.5 py-2 text-sm font-medium text-white transition disabled:opacity-60 ${
+          aria-busy={busy || undefined}
+          className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium text-white transition disabled:opacity-60 ${
             danger ? "bg-red-600 hover:bg-red-500" : "bg-indigo-600 hover:bg-indigo-500"
           }`}
         >
-          {busy ? "Working…" : confirmLabel}
+          {busy ? (
+            <>
+              <span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden />
+              {busyLabel}
+            </>
+          ) : (
+            confirmLabel
+          )}
         </button>
       </div>
     </Dialog>
