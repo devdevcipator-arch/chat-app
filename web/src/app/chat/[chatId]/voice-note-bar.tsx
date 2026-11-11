@@ -5,8 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioRecorder, RecorderError, type RecordedAudio } from "@/lib/audio-recorder";
 import { formatDuration } from "@/lib/chat";
 
-// The composer in "recording mode": trash on the left, then pause/resume, a
-// red pulsing dot, timer and live level meter, and send on the right.
+// The composer in "recording mode": trash on the left, then a red pulsing
+// dot, pause/resume, timer and live level meter, and send on the right.
 // Recording starts on mount; leaving (cancel, send, unmount, Escape)
 // releases the mic. While paused the clock and the meter freeze; sending
 // while paused sends everything recorded so far.
@@ -163,39 +163,12 @@ export function VoiceNoteBar({
       </button>
 
       <div
-        className={`flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-2xl border pr-3.5 pl-1 transition-colors ${
+        className={`flex h-10 min-w-0 flex-1 items-center gap-2 rounded-2xl border pr-3.5 pl-3 transition-colors ${
           isPaused
             ? "border-amber-200 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/30"
             : "border-red-200 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/30"
         }`}
       >
-        <button
-          type="button"
-          onClick={togglePause}
-          disabled={!ready}
-          aria-label={isPaused ? "Resume recording" : "Pause recording"}
-          aria-pressed={isPaused}
-          title={isPaused ? "Resume recording" : "Pause recording"}
-          className={`flex size-8 shrink-0 items-center justify-center rounded-full transition disabled:opacity-40 ${
-            isPaused
-              ? "bg-red-600 text-white shadow-sm hover:bg-red-500"
-              : "text-red-700 hover:bg-red-100 dark:text-red-300 dark:hover:bg-red-900/50"
-          }`}
-        >
-          {isPaused ? (
-            // Resume: back to the mic.
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="size-4" aria-hidden>
-              <rect x="9" y="2.5" width="6" height="12" rx="3" />
-              <path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" />
-            </svg>
-          ) : (
-            <svg viewBox="0 0 24 24" fill="currentColor" className="size-4" aria-hidden>
-              <rect x="6" y="5" width="4" height="14" rx="1" />
-              <rect x="14" y="5" width="4" height="14" rx="1" />
-            </svg>
-          )}
-        </button>
-
         <span className="relative flex size-2.5 shrink-0" aria-hidden>
           {live && <span className="absolute inset-0 animate-ping rounded-full bg-red-500/60" />}
           <span
@@ -204,6 +177,34 @@ export function VoiceNoteBar({
             }`}
           />
         </span>
+
+        {/* Always rendered (even at 00:00); only disabled until the mic is live. */}
+        <button
+          type="button"
+          onClick={togglePause}
+          disabled={!ready}
+          aria-label={isPaused ? "Resume recording" : "Pause recording"}
+          aria-pressed={isPaused}
+          title={isPaused ? "Resume recording" : "Pause recording"}
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-sm transition disabled:cursor-wait disabled:opacity-60 ${
+            isPaused
+              ? "bg-red-600 text-white hover:bg-red-500"
+              : "bg-white text-red-700 ring-1 ring-red-200 hover:bg-red-100 dark:bg-red-900/60 dark:text-red-100 dark:ring-red-800 dark:hover:bg-red-900"
+          }`}
+        >
+          {isPaused ? (
+            // Resume: back to the mic.
+            <svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]" aria-hidden>
+              <rect x="9" y="2.5" width="6" height="12" rx="3" />
+              <path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" width={18} height={18} fill="currentColor" className="h-[18px] w-[18px]" aria-hidden>
+              <rect x="6" y="5" width="4" height="14" rx="1" />
+              <rect x="14" y="5" width="4" height="14" rx="1" />
+            </svg>
+          )}
+        </button>
         <span
           className={`shrink-0 text-sm font-medium tabular-nums ${
             isPaused ? "text-amber-700 dark:text-amber-300" : "text-red-700 dark:text-red-300"
