@@ -13,10 +13,12 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Avatar } from "@/components/avatar";
+import { Menu } from "@/components/menu";
 import {
   MESSAGE_MAX,
   MESSAGE_PAGE_SIZE,
   chatName,
+  editWindowLeftMs,
   formatMessageTime,
   mergeMessages,
   profileName,
@@ -37,6 +39,7 @@ import {
   type MediaMimeType,
 } from "@/lib/media";
 import { UploadError, compressImage, requestUploadUrl, uploadToR2 } from "@/lib/media-client";
+import { EditError, editMessage } from "@/lib/message-edit";
 import { createClient } from "@/lib/supabase/client";
 import { markVoicemailPlayed } from "@/lib/voicemail-client";
 import { CallButton } from "../call/call-button";
@@ -87,6 +90,8 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const closeLightbox = useCallback(() => setLightbox(null), []);
+  /** The message being edited in the composer, if any. */
+  const [editing, setEditing] = useState<ChatMessage | null>(null);
 
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -159,7 +164,10 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       onChatEvent((event) => {
         if (event.chatId !== chatId) return;
         if (event.type === "muted") setDetails((d) => ({ ...d, isMuted: event.muted }));
-        else if (event.type === "cleared") setMessages([]);
+        else if (event.type === "cleared") {
+          setMessages([]);
+          setEditing(null);
+        }
         else if (event.type === "updated") {
           void fetchChatDetails(supabase, chatId).then((fresh) => fresh && setDetails(fresh));
         }
@@ -225,6 +233,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       duration_seconds: null,
       call_id: null,
       voicemail_played_at: null,
+      edited_at: null,
       created_at: new Date().toISOString(),
       status: "sending",
     };
@@ -321,6 +330,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       duration_seconds: media.durationSeconds ?? null,
       call_id: null,
       voicemail_played_at: null,
+      edited_at: null,
       created_at: new Date().toISOString(),
       status: "sending",
       localUrl,
@@ -340,6 +350,35 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
     },
     [supabase, patch],
   );
+
+  // --- Editing --------------------------------------------------------------
+
+  function startEdit(message: ChatMessage) {
+    if (editWindowLeftMs(message.created_at) <= 0) return; // the menu hides itself at the limit
+    setNotice(null);
+    setEditing(message);
+  }
+
+  const cancelEdit = useCallback(() => setEditing(null), []);
+
+  /** Shows the new text right away; Postgres has the final say (10-minute rule). */
+  async function saveEdit(content: string) {
+    const target = editing;
+    setEditing(null);
+    if (!target) return;
+    const current = messages.find((m) => m.id === target.id) ?? target;
+    if (content === current.content) return;
+
+    const before = { content: current.content, edited_at: current.edited_at };
+    patch(target.id, { content, edited_at: new Date().toISOString() });
+    try {
+      const row = await editMessage(supabase, target.id, content);
+      setMessages((prev) => (prev.some((m) => m.id === row.id) ? mergeMessages(prev, [row]) : prev));
+    } catch (e) {
+      patch(target.id, before);
+      setNotice(e instanceof EditError ? e.message : "Couldn't edit the message. Please try again.");
+    }
+  }
 
   function retry(message: ChatMessage) {
     const again: Partial<ChatMessage> = { status: "sending", error: undefined };
@@ -447,6 +486,9 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
                       ? (message.sender_id && memberNames.get(message.sender_id)) || "Former member"
                       : null
                   }
+                  editable={message.sender_id === meId && message.message_type === "text" && !message.status}
+                  beingEdited={editing?.id === message.id}
+                  onEdit={() => startEdit(message)}
                   onRetry={() => retry(message)}
                   onOpenImage={setLightbox}
                   onVoicemailPlayed={handleVoicemailPlayed}
@@ -481,6 +523,9 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
         onAttach={(file) => void handleAttach(file)}
         onVoiceNote={handleVoiceNote}
         onNotice={setNotice}
+        editing={editing && { id: editing.id, content: editing.content ?? "" }}
+        onSaveEdit={(content) => void saveEdit(content)}
+        onCancelEdit={cancelEdit}
       />
       <Lightbox src={lightbox} onClose={closeLightbox} />
       {group && <GroupInfo open={infoOpen} onClose={closeInfo} meId={meId} details={details} />}
@@ -493,6 +538,9 @@ function MessageBubble({
   mine,
   grouped,
   senderLabel,
+  editable,
+  beingEdited,
+  onEdit,
   onRetry,
   onOpenImage,
   onVoicemailPlayed,
@@ -502,10 +550,16 @@ function MessageBubble({
   grouped: boolean;
   /** Shown above the first bubble of a run in group chats. */
   senderLabel: string | null;
+  /** My own delivered text message (editing still depends on the 10-minute window). */
+  editable: boolean;
+  beingEdited: boolean;
+  onEdit: () => void;
   onRetry: () => void;
   onOpenImage: (src: string) => void;
   onVoicemailPlayed: (id: string) => void;
 }) {
+  const canEdit = useEditWindowOpen(message.created_at, editable);
+
   if (message.message_type === "system") {
     return <li className="my-2 text-center text-xs text-zinc-500">{message.content}</li>;
   }
@@ -557,7 +611,7 @@ function MessageBubble({
             mine
               ? "rounded-br-md bg-indigo-600 text-white"
               : "rounded-bl-md bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
-          } ${sending ? "opacity-70" : ""}`}
+          } ${sending ? "opacity-70" : ""} ${beingEdited ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-white dark:ring-offset-zinc-950" : ""}`}
         >
           {message.content}
         </div>
@@ -585,7 +639,18 @@ function MessageBubble({
             {senderLabel}
           </span>
         )}
-        {body}
+        {canEdit ? (
+          <div className="group/msg flex max-w-full items-center gap-1">
+            <Menu
+              label="Message options"
+              items={[{ label: "Edit", onSelect: onEdit }]}
+              triggerClassName="shrink-0 opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:opacity-100"
+            />
+            <div className="min-w-0">{body}</div>
+          </div>
+        ) : (
+          body
+        )}
         <div className="mt-0.5 flex items-center gap-1.5 px-1 text-[11px] text-zinc-500">
           {message.status === "failed" ? (
             <>
@@ -597,9 +662,20 @@ function MessageBubble({
           ) : sending ? (
             <span>{message.message_type === "text" ? "Sending…" : "Uploading…"}</span>
           ) : message.message_type === "voicemail" ? null : (
-            <time suppressHydrationWarning dateTime={message.created_at}>
-              {formatMessageTime(message.created_at)}
-            </time>
+            <>
+              <time suppressHydrationWarning dateTime={message.created_at}>
+                {formatMessageTime(message.created_at)}
+              </time>
+              {message.edited_at && (
+                <span
+                  suppressHydrationWarning
+                  title={`Edited ${new Date(message.edited_at).toLocaleString()}`}
+                  className="cursor-default"
+                >
+                  · edited
+                </span>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -607,16 +683,44 @@ function MessageBubble({
   );
 }
 
+/**
+ * Whether my message can still be edited, flipping to false exactly when the
+ * 10-minute window closes. Starts false so server and client render alike.
+ */
+function useEditWindowOpen(createdAt: string, enabled: boolean) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!enabled) return;
+    const left = editWindowLeftMs(createdAt);
+    if (left <= 0) return;
+    const show = window.setTimeout(() => setOpen(true), 0);
+    const hide = window.setTimeout(() => setOpen(false), left);
+    return () => {
+      window.clearTimeout(show);
+      window.clearTimeout(hide);
+      setOpen(false);
+    };
+  }, [createdAt, enabled]);
+  return enabled && open;
+}
+
 function Composer({
   onSend,
   onAttach,
   onVoiceNote,
   onNotice,
+  editing,
+  onSaveEdit,
+  onCancelEdit,
 }: {
   onSend: (content: string) => void;
   onAttach: (file: File) => void;
   onVoiceNote: (audio: RecordedAudio) => void;
   onNotice: (message: string) => void;
+  /** Editing mode: the message whose text is in the input. */
+  editing: { id: string; content: string } | null;
+  onSaveEdit: (content: string) => void;
+  onCancelEdit: () => void;
 }) {
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
@@ -624,20 +728,48 @@ function Composer({
   const input = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // Entering / leaving editing mode swaps the input's text (adjusted during
+  // render, not in an effect). Any unsent draft comes back afterwards.
+  const editingId = editing?.id ?? null;
+  const [shownEditId, setShownEditId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  if (editingId !== shownEditId) {
+    setShownEditId(editingId);
+    if (editing) {
+      if (shownEditId === null) setDraft(text);
+      setText(editing.content);
+    } else {
+      setText(draft);
+      setDraft("");
+    }
+  }
+
+  // Focus the input with the cursor at the end when editing starts.
+  useLayoutEffect(() => {
+    const el = input.current;
+    if (!editingId || !el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [editingId, recording]);
+
   // Auto-grow up to ~6 lines.
   useLayoutEffect(() => {
     const el = input.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-  }, [text]);
+  }, [text, recording]);
 
   function submit(e?: FormEvent) {
     e?.preventDefault();
     const content = text.trim();
     if (!content) return;
-    onSend(content);
-    setText("");
+    if (editing) {
+      onSaveEdit(content); // the text swap above restores the draft
+    } else {
+      onSend(content);
+      setText("");
+    }
     input.current?.focus();
   }
 
@@ -645,6 +777,9 @@ function Composer({
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submit();
+    } else if (e.key === "Escape" && editing) {
+      e.preventDefault();
+      onCancelEdit();
     }
   }
 
@@ -663,64 +798,110 @@ function Composer({
   }
 
   return (
-    <form onSubmit={submit} className="flex shrink-0 items-end gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
-      <input
-        ref={fileInput}
-        type="file"
-        accept={ACCEPTED_FILE_INPUT}
-        multiple
-        onChange={handleFiles}
-        className="hidden"
-        tabIndex={-1}
-        aria-hidden
-      />
-      <button
-        type="button"
-        onClick={() => fileInput.current?.click()}
-        aria-label="Attach photo or audio"
-        title="Attach photo or audio"
-        className="flex size-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="size-5" aria-hidden>
-          <rect x="3" y="4" width="18" height="16" rx="3" />
-          <circle cx="9" cy="10" r="1.8" />
-          <path d="M21 16l-5-5-8 8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-      <textarea
-        ref={input}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={handleKeyDown}
-        rows={1}
-        maxLength={MESSAGE_MAX}
-        placeholder="Message"
-        aria-label="Message"
-        autoFocus
-        className="max-h-40 min-h-10 flex-1 resize-none rounded-2xl border border-zinc-300 bg-white px-4 py-2 text-[15px] outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-900"
-      />
-      <button
-        type="button"
-        onClick={() => setRecording(true)}
-        aria-label="Record voice message"
-        title="Record voice message"
-        className="flex size-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className="size-5" aria-hidden>
-          <rect x="9" y="2.5" width="6" height="12" rx="3" />
-          <path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" />
-        </svg>
-      </button>
-      <button
-        type="submit"
-        disabled={!text.trim()}
-        aria-label="Send message"
-        className="flex size-10 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white transition hover:bg-indigo-500 disabled:opacity-40"
-      >
-        <svg viewBox="0 0 24 24" fill="currentColor" className="size-5" aria-hidden>
-          <path d="M3.4 20.4 21 12 3.4 3.6l-.01 6.53L15 12l-11.61 1.87z" />
-        </svg>
-      </button>
-    </form>
+    <div className="shrink-0 border-t border-zinc-200 dark:border-zinc-800">
+      <AnimatePresence initial={false}>
+        {editing && (
+          <motion.div
+            key="editing"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.15 }}
+            className="overflow-hidden"
+          >
+            <div className="mx-3 mt-3 flex items-center gap-3 rounded-xl border-l-4 border-amber-400 bg-amber-50 py-2 pr-2 pl-3 dark:bg-amber-950/30">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className="size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden>
+                <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+              </svg>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">Editing message</p>
+                <p className="truncate text-sm text-zinc-600 dark:text-zinc-300">{editing.content}</p>
+              </div>
+              <button
+                type="button"
+                onClick={onCancelEdit}
+                aria-label="Cancel editing"
+                className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-600 transition hover:bg-amber-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-amber-900/40 dark:hover:text-white"
+              >
+                Cancel <kbd className="ml-0.5 font-sans text-zinc-400">(Esc)</kbd>
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <form onSubmit={submit} className="flex items-end gap-2 p-3">
+        {!editing && (
+          <>
+            <input
+              ref={fileInput}
+              type="file"
+              accept={ACCEPTED_FILE_INPUT}
+              multiple
+              onChange={handleFiles}
+              className="hidden"
+              tabIndex={-1}
+              aria-hidden
+            />
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              aria-label="Attach photo or audio"
+              title="Attach photo or audio"
+              className="flex size-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="size-5" aria-hidden>
+                <rect x="3" y="4" width="18" height="16" rx="3" />
+                <circle cx="9" cy="10" r="1.8" />
+                <path d="M21 16l-5-5-8 8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </>
+        )}
+        <textarea
+          ref={input}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={handleKeyDown}
+          rows={1}
+          maxLength={MESSAGE_MAX}
+          placeholder={editing ? "Edit message" : "Message"}
+          aria-label={editing ? "Edit message" : "Message"}
+          autoFocus
+          className="max-h-40 min-h-10 flex-1 resize-none rounded-2xl border border-zinc-300 bg-white px-4 py-2 text-[15px] outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-900"
+        />
+        {!editing && (
+          <button
+            type="button"
+            onClick={() => setRecording(true)}
+            aria-label="Record voice message"
+            title="Record voice message"
+            className="flex size-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className="size-5" aria-hidden>
+              <rect x="9" y="2.5" width="6" height="12" rx="3" />
+              <path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" />
+            </svg>
+          </button>
+        )}
+        <button
+          type="submit"
+          disabled={!text.trim()}
+          aria-label={editing ? "Save edit" : "Send message"}
+          title={editing ? "Save edit" : undefined}
+          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white transition hover:bg-indigo-500 disabled:opacity-40"
+        >
+          {editing ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" className="size-5" aria-hidden>
+              <path d="M5 12.5l4.5 4.5L19 7.5" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="currentColor" className="size-5" aria-hidden>
+              <path d="M3.4 20.4 21 12 3.4 3.6l-.01 6.53L15 12l-11.61 1.87z" />
+            </svg>
+          )}
+        </button>
+      </form>
+    </div>
   );
 }

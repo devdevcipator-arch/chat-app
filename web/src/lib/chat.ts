@@ -67,6 +67,13 @@ export const asRole = (value: string | null | undefined): MemberRole => (value =
 
 export const MESSAGE_MAX = 4000;
 export const MESSAGE_PAGE_SIZE = 100;
+
+/** Authors can edit their text messages this long after sending (enforced by edit_message in Postgres). */
+export const EDIT_WINDOW_MS = 10 * 60 * 1000;
+
+/** Milliseconds left to edit a message sent at `createdAt` (≤ 0 once it has closed). */
+export const editWindowLeftMs = (createdAt: string, now = Date.now()) =>
+  EDIT_WINDOW_MS - (now - new Date(createdAt).getTime());
 export const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

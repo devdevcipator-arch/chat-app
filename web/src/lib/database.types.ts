@@ -242,6 +242,7 @@ export type Database = {
           content: string | null
           created_at: string
           duration_seconds: number | null
+          edited_at: string | null
           id: string
           media_url: string | null
           message_type: string
@@ -254,6 +255,7 @@ export type Database = {
           content?: string | null
           created_at?: string
           duration_seconds?: number | null
+          edited_at?: string | null
           id?: string
           media_url?: string | null
           message_type: string
@@ -266,6 +268,7 @@ export type Database = {
           content?: string | null
           created_at?: string
           duration_seconds?: number | null
+          edited_at?: string | null
           id?: string
           media_url?: string | null
           message_type?: string
@@ -414,6 +417,28 @@ export type Database = {
         Returns: string
       }
       delete_group: { Args: { p_chat_id: string }; Returns: undefined }
+      edit_message: {
+        Args: { p_message_id: string; p_new_content: string }
+        Returns: {
+          call_id: string | null
+          chat_id: string
+          content: string | null
+          created_at: string
+          duration_seconds: number | null
+          edited_at: string | null
+          id: string
+          media_url: string | null
+          message_type: string
+          sender_id: string | null
+          voicemail_played_at: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "messages"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       end_call: {
         Args: { p_call_id: string; p_timeout?: boolean }
         Returns: {
