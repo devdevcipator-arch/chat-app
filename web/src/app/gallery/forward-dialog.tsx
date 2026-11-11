@@ -123,7 +123,7 @@ function ForwardPanel({
                       : "hover:bg-zinc-100 disabled:hover:bg-transparent dark:hover:bg-zinc-800"
                   }`}
                 >
-                  <Avatar name={name} group={group} size="sm" />
+                  <Avatar name={name} src={group ? null : chat.other?.avatarUrl} group={group} size="sm" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{name}</span>
                     <span className="block truncate text-xs text-zinc-500">

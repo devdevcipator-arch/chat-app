@@ -161,7 +161,7 @@ function PersonRow({
   return (
     <li>
       <label className="flex cursor-pointer items-center gap-3 rounded-lg px-1 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-        <Avatar name={profileName(profile)} size="sm" />
+        <Avatar name={profileName(profile)} src={profile.avatarUrl} size="sm" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium">{profileName(profile)}</span>
           <span className="block truncate text-xs text-zinc-500">

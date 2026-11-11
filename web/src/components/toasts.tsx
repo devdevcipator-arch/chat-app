@@ -3,7 +3,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertIcon, CheckIcon, CloseIcon } from "./icons";
+import { AlertIcon, CheckIcon, CloseIcon } from "@/app/gallery/icons";
 
 export type Toast = {
   id: number;

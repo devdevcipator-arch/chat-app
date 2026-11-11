@@ -180,6 +180,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
 
   /** Sender names for group bubbles; people who left show as "Former member". */
   const memberNames = new Map(details.members.map((m) => [m.id, profileName(m)]));
+  const memberAvatars = new Map(details.members.map((m) => [m.id, m.avatarUrl]));
 
   // Keep the view pinned to the newest message unless the user scrolled up.
   useLayoutEffect(() => {
@@ -447,7 +448,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
           </button>
         ) : (
           <>
-            <Avatar name={name} />
+            <Avatar name={name} src={other?.avatarUrl} />
             <div className="min-w-0 flex-1">
               <p className="truncate font-medium">{name}</p>
               {other?.username && <p className="truncate text-xs text-zinc-500">@{other.username}</p>}
@@ -513,6 +514,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
                   editable={message.sender_id === meId && message.message_type === "text" && !message.status}
                   beingEdited={editing?.id === message.id}
                   onEdit={() => startEdit(message)}
+                  senderAvatar={message.sender_id ? memberAvatars.get(message.sender_id) : null}
                   onRetry={() => retry(message)}
                   onOpenImage={setLightbox}
                   onVoicemailPlayed={handleVoicemailPlayed}
@@ -563,6 +565,7 @@ function MessageBubble({
   mine,
   grouped,
   senderLabel,
+  senderAvatar,
   editable,
   beingEdited,
   onEdit,
@@ -575,6 +578,7 @@ function MessageBubble({
   grouped: boolean;
   /** Shown above the first bubble of a run in group chats. */
   senderLabel: string | null;
+  senderAvatar?: string | null;
   /** My own delivered text message (editing still depends on the 10-minute window). */
   editable: boolean;
   beingEdited: boolean;
@@ -675,7 +679,7 @@ function MessageBubble({
       <div className={`flex max-w-[80%] flex-col md:max-w-[65%] ${mine ? "items-end" : "items-start"}`}>
         {senderLabel && !grouped && (
           <span className="mb-1 flex items-center gap-1.5 px-0.5 text-xs font-medium text-indigo-600 dark:text-indigo-400">
-            <Avatar name={senderLabel} size="xs" />
+            <Avatar name={senderLabel} src={senderAvatar} size="xs" />
             {senderLabel}
           </span>
         )}

@@ -117,7 +117,7 @@ export function UserSearch({
               {result.kind === "error" && <p className="text-red-600 dark:text-red-400">{result.message}</p>}
               {result.kind === "found" && (
                 <div className="flex items-center gap-3">
-                  <Avatar name={profileName(result.profile)} size="sm" />
+                  <Avatar name={profileName(result.profile)} src={result.profile.avatarUrl} size="sm" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{profileName(result.profile)}</p>
                     <p className="truncate text-xs text-zinc-500">@{result.profile.username}</p>

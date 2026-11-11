@@ -199,7 +199,7 @@ function Panel({ details, meId, onClose }: { details: ChatDetails; meId: string;
               const opening = messagingId === member.id;
               const identity = (
                 <>
-                  <Avatar name={name} size="sm" />
+                  <Avatar name={name} src={member.avatarUrl} size="sm" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{isMe ? "You" : name}</span>
                     <span className="block truncate text-xs text-zinc-500">

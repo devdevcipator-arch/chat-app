@@ -14,7 +14,7 @@ export async function proxy(request: NextRequest) {
 
   const isLogin = matches(path, "/login");
   const isOnboarding = matches(path, "/onboarding");
-  const isApp = matches(path, "/chat") || matches(path, "/gallery");
+  const isApp = matches(path, "/chat") || matches(path, "/gallery") || matches(path, "/settings");
 
   if (!isLogin && !isOnboarding && !isApp) return response;
 

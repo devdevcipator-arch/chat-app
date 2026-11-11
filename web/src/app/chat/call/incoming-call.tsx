@@ -40,7 +40,7 @@ export function IncomingCall() {
           <div className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-2xl shadow-zinc-900/20 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
             <div className="relative">
               <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/40" aria-hidden />
-              <Avatar name={profileName(incoming.peer)} size="lg" />
+              <Avatar name={profileName(incoming.peer)} src={incoming.peer.avatarUrl} size="lg" />
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate font-semibold">{profileName(incoming.peer)}</p>

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/avatar";
+import { ThemeSync } from "@/components/theme";
+import type { Profile } from "@/lib/auth";
 import { markRead } from "@/lib/chat-actions";
 import { onChatEvent } from "@/lib/chat-events";
 import {
@@ -14,7 +16,6 @@ import {
   toChatSummary,
   type ChatSummary,
   type MessageRow,
-  type PublicProfile,
 } from "@/lib/chat";
 import { pageIsActive, playMessageSound, showMessageNotification } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/client";
@@ -31,7 +32,7 @@ export function ChatSidebar({
   me,
   initialChats,
 }: {
-  me: PublicProfile & { username: string };
+  me: Profile & { username: string };
   initialChats: ChatSummary[];
 }) {
   const router = useRouter();
@@ -284,12 +285,30 @@ export function ChatSidebar({
         )}
       </nav>
 
-      <div className="flex items-center gap-3 border-t border-zinc-200 p-3 dark:border-zinc-800">
-        <Avatar name={myName} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{myName}</p>
-          <p className="truncate text-xs text-zinc-500">@{me.username}</p>
-        </div>
+      <ThemeSync preference={me.themePreference} />
+      <div className="flex items-center gap-1 border-t border-zinc-200 p-2 dark:border-zinc-800">
+        <Link
+          href="/settings/profile"
+          aria-label={`${myName}, @${me.username}: profile and settings`}
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 transition hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60"
+        >
+          <Avatar name={myName} src={me.avatarUrl} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">{myName}</p>
+            <p className="truncate text-xs text-zinc-500">@{me.username}</p>
+          </div>
+        </Link>
+        <Link
+          href="/settings/profile"
+          aria-label="Profile and settings"
+          title="Profile & settings"
+          className="flex size-9 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-zinc-200/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="size-5" aria-hidden>
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </Link>
         <SignOutButton />
       </div>
     </>
@@ -322,7 +341,7 @@ function ChatRow({ chat, meId, active }: { chat: ChatSummary; meId: string; acti
           active ? "bg-indigo-50 dark:bg-indigo-950/50" : "hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60"
         }`}
       >
-        <Avatar name={name} group={group} />
+        <Avatar name={name} src={group ? null : chat.other?.avatarUrl} group={group} />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
             <p className={`min-w-0 flex-1 truncate text-sm ${unread ? "font-semibold" : "font-medium"}`}>{name}</p>

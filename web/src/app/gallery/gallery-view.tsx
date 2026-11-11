@@ -23,7 +23,7 @@ import {
   UploadIcon,
 } from "./icons";
 import { MediaViewer } from "./media-viewer";
-import { Toasts, useToasts } from "./toasts";
+import { Toasts, useToasts } from "@/components/toasts";
 
 type Upload = { id: string; name: string; size: number; progress: number; error?: string };
 
