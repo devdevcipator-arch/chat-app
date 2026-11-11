@@ -2,7 +2,8 @@ import { FadeIn } from "@/components/fade-in";
 
 export default function ChatHome() {
   return (
-    <div className="flex flex-1 items-center justify-center p-8">
+    // Desktop only: on mobile /chat is the chat list (see layout.tsx).
+    <div className="hidden flex-1 flex-col items-center justify-center p-8 md:flex">
       <FadeIn>
         <div className="max-w-xs text-center">
           <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">
