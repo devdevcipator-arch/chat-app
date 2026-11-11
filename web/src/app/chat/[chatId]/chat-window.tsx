@@ -9,7 +9,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
@@ -32,15 +31,14 @@ import type { CallTarget, GroupCallInfo } from "@/lib/call/types";
 import { fetchChatDetails } from "@/lib/chat-actions";
 import { onChatEvent } from "@/lib/chat-events";
 import {
-  ACCEPTED_FILE_INPUT,
   ACCEPTED_IMAGE_INPUTS,
   AUDIO_TYPES,
   MAX_UPLOAD_BYTES,
   mediaPublicUrl,
-  type MediaMimeType,
 } from "@/lib/media";
 import { UploadError, compressImage, requestUploadUrl, uploadToR2 } from "@/lib/media-client";
 import { ESCAPE_LAYER, escapeIsTaken } from "@/lib/escape";
+import { chatUploadRule, formatLimit, resolveChatFileType, type ChatUploadKind } from "@/lib/chat-upload";
 import { EditError, editMessage } from "@/lib/message-edit";
 import { createClient } from "@/lib/supabase/client";
 import { formatBytes } from "@/lib/vault";
@@ -48,6 +46,7 @@ import { markVoicemailPlayed } from "@/lib/voicemail-client";
 import { CallButton } from "../call/call-button";
 import { GroupCallBanner } from "../call/group-call-banner";
 import { ChatMenu } from "../chat-menu";
+import { AttachMenu } from "./attach-menu";
 import { GroupInfo } from "./group-info";
 import { AudioMessage, FileMessage, ImageMessage, Lightbox, VideoMessage } from "./media";
 import { VOICE_NOTE_MAX_SECONDS, VoiceNoteBar } from "./voice-note-bar";
@@ -65,8 +64,8 @@ type Props = {
 /** A file that has been validated (and compressed) and is ready to upload. */
 type PreparedMedia = {
   blob: Blob;
-  type: MediaMimeType;
-  kind: "image" | "audio";
+  type: string;
+  kind: ChatUploadKind;
   fileName: string;
   /** Recorded voice notes know their length. */
   durationSeconds?: number;
@@ -262,13 +261,19 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
         });
         // 2. Upload straight to R2; throttle progress updates to whole percents.
         let lastPct = -1;
-        await uploadToR2(target, media.blob, (fraction) => {
-          const pct = Math.floor(fraction * 100);
-          if (pct !== lastPct) {
-            lastPct = pct;
-            patch(message.id, { progress: fraction });
-          }
-        });
+        const big = media.kind === "video" || media.kind === "file";
+        await uploadToR2(
+          target,
+          media.blob,
+          (fraction) => {
+            const pct = Math.floor(fraction * 100);
+            if (pct !== lastPct) {
+              lastPct = pct;
+              patch(message.id, { progress: fraction });
+            }
+          },
+          big ? 10 * 60_000 : undefined, // videos / documents can be up to 100 MB
+        );
         // 3. Record the message. media_url stores the object key, not a URL.
         await insertMessage(message, target.key);
         pendingMedia.current.delete(message.id);
@@ -285,13 +290,17 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       if (image.blob.size > MAX_UPLOAD_BYTES.image) throw new UploadError("That image is too large.");
       return { blob: image.blob, type: image.type, kind: "image", fileName: file.name };
     }
-    if (file.type in AUDIO_TYPES) {
-      if (file.size > MAX_UPLOAD_BYTES.audio) {
-        throw new UploadError(`Audio files must be ${MAX_UPLOAD_BYTES.audio / 1024 / 1024} MB or smaller.`);
-      }
-      return { blob: file, type: file.type as MediaMimeType, kind: "audio", fileName: file.name };
+    // Audio, video and documents upload as they are, under their canonical type.
+    const type = resolveChatFileType(file);
+    const rule = type && chatUploadRule(type);
+    if (!type || !rule) {
+      throw new UploadError(`"${file.name}" can't be sent. Supported: photos, videos, audio, PDF, Word, Excel, PowerPoint, TXT, CSV and ZIP.`);
     }
-    throw new UploadError("Only images (JPEG, PNG, WebP, GIF, AVIF) and audio files are supported.");
+    if (file.size > rule.maxBytes) throw new UploadError(`"${file.name}" is larger than ${formatLimit(rule.maxBytes)}.`);
+    if (file.size === 0) throw new UploadError(`"${file.name}" is empty.`);
+    // Re-tag so the body matches the signed Content-Type exactly.
+    const blob = file.type === type ? file : new Blob([file], { type });
+    return { blob, type, kind: rule.kind, fileName: file.name };
   }
 
   async function handleAttach(file: File) {
@@ -352,7 +361,8 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       chat_id: chatId,
       sender_id: meId,
       message_type: media.kind,
-      content: media.caption || null,
+      // Videos and files show their name in the bubble; images may have a caption.
+      content: media.kind === "video" || media.kind === "file" ? media.fileName.slice(0, 255) : media.caption || null,
       media_url: null,
       duration_seconds: media.durationSeconds ?? null,
       call_id: null,
@@ -724,7 +734,11 @@ function MessageBubble({
               </button>
             </>
           ) : sending ? (
-            <span>{message.message_type === "text" ? "Sending…" : "Uploading…"}</span>
+            <span>
+              {message.message_type === "text"
+                ? "Sending…"
+                : `Uploading…${message.progress !== undefined ? ` ${Math.round(message.progress * 100)}%` : ""}`}
+            </span>
           ) : message.message_type === "voicemail" ? null : (
             <>
               <time suppressHydrationWarning dateTime={message.created_at}>
@@ -810,7 +824,6 @@ function Composer({
   const [recording, setRecording] = useState(false);
   const stopRecording = useCallback(() => setRecording(false), []);
   const input = useRef<HTMLTextAreaElement>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   // Entering / leaving editing mode swaps the input's text (adjusted during
   // render, not in an effect). Any unsent draft comes back afterwards.
@@ -943,12 +956,6 @@ function Composer({
     }
   }
 
-  function handleFiles(e: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = ""; // allow picking the same file again
-    files.slice(0, 10).forEach(onAttach);
-  }
-
   if (recording) {
     return (
       <div className="flex shrink-0 items-end gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
@@ -1061,33 +1068,7 @@ function Composer({
       </AnimatePresence>
 
       <form onSubmit={submit} className="flex items-end gap-2 p-3">
-        {!editing && (
-          <>
-            <input
-              ref={fileInput}
-              type="file"
-              accept={ACCEPTED_FILE_INPUT}
-              multiple
-              onChange={handleFiles}
-              className="hidden"
-              tabIndex={-1}
-              aria-hidden
-            />
-            <button
-              type="button"
-              onClick={() => fileInput.current?.click()}
-              aria-label="Attach photo or audio"
-              title="Attach photo or audio"
-              className="flex size-10 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="size-5" aria-hidden>
-                <rect x="3" y="4" width="18" height="16" rx="3" />
-                <circle cx="9" cy="10" r="1.8" />
-                <path d="M21 16l-5-5-8 8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-          </>
-        )}
+        {!editing && <AttachMenu onFiles={(files) => files.forEach(onAttach)} />}
         <textarea
           ref={input}
           value={text}

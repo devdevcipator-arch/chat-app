@@ -3,11 +3,8 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse, type NextRequest } from "next/server";
 import { UUID_PATTERN } from "@/lib/chat";
+import { chatUploadRule, formatLimit } from "@/lib/chat-upload";
 import {
-  MAX_UPLOAD_BYTES,
-  extensionFor,
-  isMediaMimeType,
-  mediaKind,
   mediaPublicUrl,
   type UploadUrlError,
   type UploadUrlRequest,
@@ -60,12 +57,10 @@ export async function POST(request: NextRequest) {
   if (typeof parsed === "string") return fail(400, parsed);
   const { chatId, fileType, fileSize } = parsed;
 
-  if (!isMediaMimeType(fileType)) return fail(415, "That file type isn't supported.");
-  const kind = mediaKind(fileType)!;
-  if (fileSize > MAX_UPLOAD_BYTES[kind]) {
-    const mb = MAX_UPLOAD_BYTES[kind] / (1024 * 1024);
-    return fail(413, `Files must be ${mb} MB or smaller.`);
-  }
+  // Images (already re-encoded), audio, videos and documents.
+  const rule = chatUploadRule(fileType);
+  if (!rule) return fail(415, "That file type isn't supported.");
+  if (fileSize > rule.maxBytes) return fail(413, `Files like this must be ${formatLimit(rule.maxBytes)} or smaller.`);
 
   // 3. Only participants may upload into a chat (RLS-scoped read).
   const { data: membership, error: membershipError } = await supabase
@@ -82,7 +77,7 @@ export async function POST(request: NextRequest) {
   const r2 = getR2();
   if (!r2) return fail(503, "Media uploads aren't configured yet.");
 
-  const key = `chats/${chatId}/${userId}/${randomUUID()}.${extensionFor(fileType)}`;
+  const key = `chats/${chatId}/${userId}/${randomUUID()}.${rule.ext}`;
   const publicUrl = mediaPublicUrl(key);
   if (!publicUrl) return fail(503, "Media uploads aren't configured yet.");
 
