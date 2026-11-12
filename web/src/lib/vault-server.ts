@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { UUID_PATTERN } from "@/lib/chat";
-import { createClient } from "@/lib/supabase/server";
+import { getApiAuth } from "@/lib/supabase/server";
 import type { VaultApiError } from "@/lib/vault";
 
 // Server-only helpers for the /api/gallery routes.
@@ -12,13 +12,8 @@ export const fail = (status: number, error: string) =>
 
 export const ok = <T>(body: T, status = 200) => NextResponse.json<T>(body, { status, headers: NO_STORE });
 
-/** The signed-in user's Supabase client and id, or null when signed out. */
-export async function authed() {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  const userId = data?.claims?.sub;
-  return userId ? { supabase, userId } : null;
-}
+/** The signed-in user's Supabase client and id (cookie or Bearer token), or null when signed out. */
+export const authed = getApiAuth;
 
 export async function readJson(request: Request): Promise<Record<string, unknown> | null> {
   try {

@@ -5,7 +5,7 @@ import {
   type AgoraTokenError,
   type AgoraTokenResponse,
 } from "@/lib/call/types";
-import { createClient } from "@/lib/supabase/server";
+import { getApiAuth } from "@/lib/supabase/server";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -21,10 +21,9 @@ const fail = (status: number, error: string) =>
  */
 export async function POST(request: NextRequest) {
   // 1. Authenticated users only.
-  const supabase = await createClient();
-  const { data: auth } = await supabase.auth.getClaims();
-  const userId = auth?.claims?.sub;
-  if (!userId) return fail(401, "Please sign in again.");
+  const auth = await getApiAuth();
+  if (!auth) return fail(401, "Please sign in again.");
+  const { supabase, userId } = auth;
 
   // 2. Validate input.
   let body: unknown;
