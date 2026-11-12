@@ -182,7 +182,7 @@ function ViewerContent({ item }: { item: GalleryItem }) {
     case "audio":
       return (
         <div className="flex w-[min(28rem,90vw)] flex-col items-center gap-5 rounded-2xl bg-white/5 p-8">
-          <div className="flex size-24 items-center justify-center rounded-3xl bg-gradient-to-br from-fuchsia-500 to-indigo-600 text-white">
+          <div className="flex size-24 items-center justify-center rounded-3xl bg-gradient-to-br from-red-700 to-indigo-500 text-white">
             <MusicIcon className="size-10" />
           </div>
           <audio src={item.url} controls autoPlay className="w-full">

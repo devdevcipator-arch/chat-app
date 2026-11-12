@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/avatar";
+import { PoweredBy } from "@/components/powered-by";
 import { ThemeSync } from "@/components/theme";
 import type { Profile } from "@/lib/auth";
 import { markRead } from "@/lib/chat-actions";
@@ -300,6 +301,7 @@ export function ChatSidebar({
         </Link>
         <SignOutButton />
       </div>
+      <PoweredBy className="pb-2" />
     </>
   );
 }

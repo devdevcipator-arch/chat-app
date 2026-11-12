@@ -14,17 +14,61 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* Devcipator palette.
+   The UI is written with `indigo-*` as the accent and `zinc-*` as the
+   neutral, so the brand lives here instead of in every component:
+   - indigo-* is the neon-orange accent scale (600 = #FF5722, 500 = #FF6B35),
+     in both themes.
+   - In dark mode, zinc-* becomes the pitch-black / dark-glass / slate-gray
+     scale (950 = canvas, 900 = cards, 400 = secondary text). */
+@theme {
+  --color-indigo-50: #fff4ef;
+  --color-indigo-100: #ffe5d8;
+  --color-indigo-200: #ffc8ae;
+  --color-indigo-300: #ffa27c;
+  --color-indigo-400: #ff8556;
+  --color-indigo-500: #ff6b35;
+  --color-indigo-600: #ff5722;
+  --color-indigo-700: #e64a19;
+  --color-indigo-800: #bf360c;
+  --color-indigo-900: #8a2a0c;
+  --color-indigo-950: #2a1007;
+}
+
 /* Dark mode follows the .dark class (set by next-themes from the user's
    Light / Dark / System choice), not the OS directly. */
 .dark {
   --background: #0a0a0a;
-  --foreground: #ededed;
+  --foreground: #ffffff;
+
+  --color-zinc-50: #ffffff;
+  --color-zinc-100: #f5f5f5;
+  --color-zinc-200: #e5e7eb;
+  --color-zinc-300: #d1d5db;
+  --color-zinc-400: #9ca3af;
+  --color-zinc-500: #7c828d;
+  --color-zinc-600: #3f3f46;
+  --color-zinc-700: #2c2c2c;
+  --color-zinc-800: #1f1f1f;
+  --color-zinc-900: #141414;
+  --color-zinc-950: #0a0a0a;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* High-tech canvas: faint gridlines under a soft orange glow, visible
+   wherever a page doesn't paint its own surface (login, onboarding). */
+.dark body {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgb(255 87 34 / 0.12), transparent 70%),
+    linear-gradient(rgb(255 255 255 / 0.025) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(90deg, rgb(255 255 255 / 0.025) 1px, transparent 1px) 0 0 / 40px 40px,
+    var(--background);
+  background-attachment: fixed;
 }
 
 /* Ringing handset on the incoming-call Accept button. */

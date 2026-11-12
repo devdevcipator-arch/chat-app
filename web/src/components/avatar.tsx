@@ -48,7 +48,7 @@ export function Avatar({
     <div
       aria-hidden
       className={`flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br font-semibold text-white uppercase ${
-        group ? "from-emerald-500 to-teal-600" : "from-indigo-500 to-violet-600"
+        group ? "from-emerald-500 to-teal-600" : "from-indigo-500 to-red-700"
       } ${sizes[size]}`}
     >
       {initials}

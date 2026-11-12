@@ -6,6 +6,7 @@ import { useTheme } from "next-themes";
 import { useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { BackIcon } from "@/app/gallery/icons";
 import { Avatar } from "@/components/avatar";
+import { PoweredBy } from "@/components/powered-by";
 import { ConfirmDialog } from "@/components/dialog";
 import { Toasts, useToasts } from "@/components/toasts";
 import type { Profile } from "@/lib/auth";
@@ -264,6 +265,8 @@ export function ProfileSettings({ me }: { me: Profile & { username: string } }) 
           </div>
         </div>
       </form>
+
+      <PoweredBy className="pb-8" />
 
       <ConfirmDialog
         open={confirmRemove}

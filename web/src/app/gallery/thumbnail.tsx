@@ -48,7 +48,7 @@ export function Thumbnail({ item }: { item: GalleryItem }) {
     <span
       className={`flex size-full flex-col items-center justify-center gap-2 ${
         audio
-          ? "bg-gradient-to-br from-fuchsia-500 to-indigo-600 text-white"
+          ? "bg-gradient-to-br from-red-700 to-indigo-500 text-white"
           : "bg-gradient-to-br from-zinc-100 to-zinc-200 text-zinc-600 dark:from-zinc-800 dark:to-zinc-900 dark:text-zinc-300"
       }`}
     >
