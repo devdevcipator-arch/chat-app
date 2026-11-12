@@ -4,32 +4,72 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/errors.dart';
+import 'core/theme.dart';
 import 'core/supabase.dart';
 import 'data/profile_repository.dart';
 import 'models/profile.dart';
+import 'screens/call_screen.dart';
 import 'screens/chat_list_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
+import 'services/call_controller.dart';
 
 final _navigatorKey = GlobalKey<NavigatorState>();
 
-class ChatApp extends StatelessWidget {
+class ChatApp extends StatefulWidget {
   const ChatApp({super.key});
 
   @override
+  State<ChatApp> createState() => _ChatAppState();
+}
+
+class _ChatAppState extends State<ChatApp> {
+  final _calls = CallController.instance;
+  Route<void>? _callRoute;
+
+  @override
+  void initState() {
+    super.initState();
+    _calls.addListener(_syncCallRoute);
+  }
+
+  @override
+  void dispose() {
+    _calls.removeListener(_syncCallRoute);
+    super.dispose();
+  }
+
+  /// Shows the full-screen call UI above everything while a call exists.
+  void _syncCallRoute() {
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) return;
+    final active = _calls.phase != CallPhase.idle;
+    if (active && _callRoute == null) {
+      final route = MaterialPageRoute<void>(builder: (_) => const CallScreen(), fullscreenDialog: true);
+      _callRoute = route;
+      navigator.push(route).whenComplete(() {
+        if (_callRoute == route) _callRoute = null;
+      });
+    } else if (!active && _callRoute != null) {
+      final route = _callRoute!;
+      _callRoute = null;
+      if (route.isActive) navigator.removeRoute(route);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    const seed = Color(0xFF4F46E5); // indigo-600, matches the web app
-    return MaterialApp(
-      title: 'Chat App',
-      navigatorKey: _navigatorKey,
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorSchemeSeed: seed, useMaterial3: true),
-      darkTheme: ThemeData(
-        colorSchemeSeed: seed,
-        brightness: Brightness.dark,
-        useMaterial3: true,
+    return ValueListenableBuilder<ThemePreference>(
+      valueListenable: ThemeController.instance,
+      builder: (context, theme, _) => MaterialApp(
+        title: 'Chat App',
+        navigatorKey: _navigatorKey,
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(Brightness.light),
+        darkTheme: buildTheme(Brightness.dark),
+        themeMode: theme.mode,
+        home: const AuthGate(),
       ),
-      home: const AuthGate(),
     );
   }
 }
@@ -101,6 +141,7 @@ class _AuthGateState extends State<AuthGate> {
 
     if (userId == null) {
       _profile = null;
+      await CallController.instance.detach();
       _setStage(_Stage.signedOut);
       return;
     }
@@ -110,6 +151,7 @@ class _AuthGateState extends State<AuthGate> {
       final profile = await ProfileRepository.fetchMine(userId);
       if (!mounted || generation != _generation) return;
       _profile = profile;
+      ThemeController.instance.applyFromProfile(profile.theme);
       _setStage(profile.hasUsername ? _Stage.ready : _Stage.onboarding);
     } catch (e) {
       if (!mounted || generation != _generation) return;
@@ -149,6 +191,7 @@ class _AuthGateState extends State<AuthGate> {
         _Stage.ready => ChatListScreen(
             key: ValueKey('chats:${_profile!.id}'),
             me: _profile!,
+            onProfileChanged: (p) => _profile = p,
           ),
         _Stage.error => Scaffold(
             key: const ValueKey('error'),

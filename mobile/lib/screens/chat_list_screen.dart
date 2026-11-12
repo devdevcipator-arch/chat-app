@@ -12,35 +12,53 @@ import '../data/profile_repository.dart';
 import '../models/chat_message.dart';
 import '../models/chat_summary.dart';
 import '../models/profile.dart';
+import '../services/call_controller.dart';
 import '../widgets/avatar.dart';
 import 'chat_screen.dart';
+import 'gallery_screen.dart';
+import 'new_group_screen.dart';
+import 'settings_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
-  const ChatListScreen({super.key, required this.me});
+  const ChatListScreen({super.key, required this.me, required this.onProfileChanged});
 
   final Profile me;
+  final ValueChanged<Profile> onProfileChanged;
 
   @override
   State<ChatListScreen> createState() => _ChatListScreenState();
 }
 
 class _ChatListScreenState extends State<ChatListScreen> {
+  late Profile _me = widget.me;
   List<ChatSummary> _chats = const [];
   bool _loading = true;
   String? _loadError;
   RealtimeChannel? _channel;
+  Timer? _refreshDebounce;
+
+  /// The chat currently open on top of the list (its unread count stays 0).
+  String? _openChatId;
 
   @override
   void initState() {
     super.initState();
     _refresh();
     _subscribe();
+    unawaited(CallController.instance.attach(widget.me.id));
+  }
+
+  @override
+  void didUpdateWidget(ChatListScreen old) {
+    super.didUpdateWidget(old);
+    if (old.me != widget.me) _me = widget.me;
   }
 
   @override
   void dispose() {
+    _refreshDebounce?.cancel();
     final channel = _channel;
-    if (channel != null) supabase.removeChannel(channel);
+    if (channel != null) unawaited(supabase.removeChannel(channel));
     super.dispose();
   }
 
@@ -62,9 +80,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
     }
   }
 
+  void _refreshSoon() {
+    _refreshDebounce?.cancel();
+    _refreshDebounce = Timer(const Duration(milliseconds: 400), _refresh);
+  }
+
   // Live updates: new messages in any of my chats (RLS filters the stream to
-  // chats I'm in) and new chats someone else started with me.
+  // chats I'm in), and my own membership rows (new chats, mute, clear, hide).
   void _subscribe() {
+    final meFilter = PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'user_id', value: widget.me.id);
     _channel = supabase
         .channel('sidebar:${widget.me.id}')
         .onPostgresChanges(
@@ -74,46 +98,64 @@ class _ChatListScreenState extends State<ChatListScreen> {
           callback: (payload) {
             final message = ChatMessage.fromMap(payload.newRecord);
             final index = _chats.indexWhere((c) => c.chatId == message.chatId);
-            if (index < 0) {
-              _refresh();
+            if (index < 0 || message.type == 'system') {
+              _refreshSoon(); // new chat, or a rename/membership change
               return;
             }
-            final updated = _chats[index].withLastMessage(LastMessage(
-              content: message.content,
-              type: message.type,
-              senderId: message.senderId,
-              createdAt: message.createdAt,
-            ));
+            final chat = _chats[index];
+            final fromOther = message.senderId != widget.me.id && _openChatId != message.chatId;
+            final updated = chat.copyWith(
+              lastMessage: LastMessage(
+                content: message.content,
+                type: message.type,
+                senderId: message.senderId,
+                createdAt: message.createdAt,
+                durationSeconds: message.durationSeconds,
+              ),
+              unreadCount: fromOther ? chat.unreadCount + 1 : chat.unreadCount,
+            );
             if (!mounted) return;
-            setState(() {
-              _chats = [updated, ..._chats.where((c) => c.chatId != message.chatId)];
-            });
+            setState(() => _chats = [updated, ..._chats.where((c) => c.chatId != message.chatId)]);
           },
         )
         .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
+          event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'chat_participants',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'user_id',
-            value: widget.me.id,
-          ),
-          callback: (_) => _refresh(),
+          filter: meFilter,
+          callback: (_) => _refreshSoon(),
         )
         .subscribe((status, error) {
           // Catch up on anything missed while (re)connecting.
-          if (status == RealtimeSubscribeStatus.subscribed) _refresh();
+          if (status == RealtimeSubscribeStatus.subscribed) _refreshSoon();
         });
   }
 
-  Future<void> _openChat(String chatId, {Profile? other}) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ChatScreen(chatId: chatId, me: widget.me, initialOther: other),
+  Future<void> _openChat(String chatId, {ChatSummary? summary, Profile? other}) async {
+    _openChatId = chatId;
+    setState(() {
+      _chats = [for (final c in _chats) c.chatId == chatId ? c.copyWith(unreadCount: 0) : c];
+    });
+    final result = await Navigator.of(context).push<Object?>(
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          chatId: chatId,
+          me: _me,
+          initialName: summary?.name ?? other?.name,
+          initialOther: summary?.other ?? other,
+          initialIsGroup: summary?.isGroup ?? false,
+        ),
       ),
     );
-    if (mounted) _refresh();
+    _openChatId = null;
+    if (!mounted) return;
+    if (result == chatRemoved) {
+      setState(() => _chats = _chats.where((c) => c.chatId != chatId).toList());
+    }
+    unawaited(_refresh());
+    if (result is String && result.startsWith('open:')) {
+      unawaited(_openChat(result.substring(5)));
+    }
   }
 
   Future<String?> _startChat(Profile other) async {
@@ -130,56 +172,110 @@ class _ChatListScreenState extends State<ChatListScreen> {
     }
   }
 
-  Future<void> _confirmSignOut() async {
-    final confirmed = await showDialog<bool>(
+  Future<void> _newGroup() async {
+    final chatId = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => NewGroupScreen(me: _me)),
+    );
+    if (chatId == null || !mounted) return;
+    await _refresh();
+    if (!mounted) return;
+    final summary = _chats.where((c) => c.chatId == chatId).firstOrNull;
+    unawaited(_openChat(chatId, summary: summary));
+  }
+
+  void _openSettings() {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => SettingsScreen(
+        me: _me,
+        onProfileChanged: (p) {
+          if (mounted) setState(() => _me = p);
+          widget.onProfileChanged(p);
+        },
+      ),
+    ));
+  }
+
+  void _openGallery() => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const GalleryScreen()));
+
+  Future<void> _chatActions(ChatSummary chat) async {
+    final choice = await showModalBottomSheet<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Sign out?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Sign out')),
-        ],
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(title: Text(chat.name, style: Theme.of(context).textTheme.titleMedium)),
+            ListTile(
+              leading: Icon(chat.isMuted ? Icons.notifications_active_outlined : Icons.notifications_off_outlined),
+              title: Text(chat.isMuted ? 'Unmute' : 'Mute notifications'),
+              onTap: () => Navigator.pop(context, 'mute'),
+            ),
+            ListTile(
+              leading: Icon(chat.isGroup ? Icons.logout : Icons.delete_outline, color: Theme.of(context).colorScheme.error),
+              title: Text(
+                chat.isGroup ? 'Leave group' : 'Delete conversation',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+              onTap: () => Navigator.pop(context, 'remove'),
+            ),
+          ],
+        ),
       ),
     );
-    if (confirmed == true) await supabase.auth.signOut();
+    if (!mounted || choice == null) return;
+    try {
+      if (choice == 'mute') {
+        await ChatRepository.setMuted(chat.chatId, !chat.isMuted);
+        if (mounted) {
+          setState(() => _chats = [for (final c in _chats) c.chatId == chat.chatId ? c.copyWith(isMuted: !chat.isMuted) : c]);
+        }
+      } else {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(chat.isGroup ? 'Leave ${chat.name}?' : 'Delete conversation?'),
+            content: Text(chat.isGroup
+                ? "You won't get new messages from this group."
+                : 'It disappears from your list. A new message brings it back.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(chat.isGroup ? 'Leave' : 'Delete'),
+              ),
+            ],
+          ),
+        );
+        if (ok != true) return;
+        await (chat.isGroup ? ChatRepository.leaveGroup(chat.chatId) : ChatRepository.hideChat(chat.chatId));
+        if (mounted) setState(() => _chats = _chats.where((c) => c.chatId != chat.chatId).toList());
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(chatActionError(e))));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final me = widget.me;
+    final me = _me;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Chats'),
         actions: [
-          PopupMenuButton<String>(
-            tooltip: 'Account',
-            icon: Avatar(name: me.name, size: 32),
-            onSelected: (value) {
-              if (value == 'signout') _confirmSignOut();
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem<String>(
-                enabled: false,
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Avatar(name: me.name),
-                  title: Text(me.name),
-                  subtitle: Text('@${me.username}'),
-                ),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem<String>(
-                value: 'signout',
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.logout),
-                  title: Text('Sign out'),
-                ),
-              ),
-            ],
+          IconButton(tooltip: 'Gallery', onPressed: _openGallery, icon: const Icon(Icons.photo_library_outlined)),
+          IconButton(
+            tooltip: 'Settings',
+            onPressed: _openSettings,
+            icon: Avatar(name: me.name, imageUrl: me.avatarImageUrl, size: 32),
           ),
           const SizedBox(width: 8),
         ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        tooltip: 'New group',
+        onPressed: _newGroup,
+        child: const Icon(Icons.group_add_outlined),
       ),
       body: Column(
         children: [
@@ -218,7 +314,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 Padding(
                   padding: EdgeInsets.fromLTRB(32, 64, 32, 0),
                   child: Text(
-                    'No conversations yet.\nSearch for an @username to start one.',
+                    'No conversations yet.\nSearch for an @username to start one, or create a group.',
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -226,12 +322,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
             )
           : ListView.separated(
               physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.only(bottom: 88),
               itemCount: _chats.length,
               separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
               itemBuilder: (context, i) => _ChatTile(
                 chat: _chats[i],
-                meId: widget.me.id,
-                onTap: () => _openChat(_chats[i].chatId, other: _chats[i].other),
+                meId: _me.id,
+                onTap: () => _openChat(_chats[i].chatId, summary: _chats[i]),
+                onLongPress: () => _chatActions(_chats[i]),
               ),
             ),
     );
@@ -239,46 +337,89 @@ class _ChatListScreenState extends State<ChatListScreen> {
 }
 
 class _ChatTile extends StatelessWidget {
-  const _ChatTile({required this.chat, required this.meId, required this.onTap});
+  const _ChatTile({required this.chat, required this.meId, required this.onTap, required this.onLongPress});
 
   final ChatSummary chat;
   final String meId;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final other = chat.other;
-    final name = other?.name ?? 'Deleted user';
     final last = chat.lastMessage;
-    final snippet = last == null
-        ? 'No messages yet'
-        : '${last.senderId == meId ? 'You: ' : ''}${messageSnippet(last.type, last.content)}';
+    final unread = chat.unreadCount > 0;
+    String snippet;
+    if (last == null) {
+      snippet = chat.isGroup ? '${chat.memberCount} members' : 'No messages yet';
+    } else {
+      final body = messageSnippet(last.type, last.content, last.durationSeconds);
+      final prefix = last.type == 'system'
+          ? ''
+          : last.senderId == meId
+              ? 'You: '
+              : chat.isGroup && last.senderName != null
+                  ? '${last.senderName}: '
+                  : '';
+      snippet = '$prefix$body';
+    }
 
     return ListTile(
       onTap: onTap,
-      leading: Avatar(name: name, size: 44),
+      onLongPress: onLongPress,
+      leading: Avatar(
+        name: chat.name,
+        imageUrl: chat.isGroup ? null : chat.other?.avatarImageUrl,
+        group: chat.isGroup,
+        size: 44,
+      ),
       title: Row(
         children: [
-          Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis)),
+          Expanded(
+            child: Text(
+              chat.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: unread ? const TextStyle(fontWeight: FontWeight.w700) : null,
+            ),
+          ),
+          if (chat.isMuted)
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Icon(Icons.notifications_off, size: 14, color: scheme.onSurfaceVariant),
+            ),
           const SizedBox(width: 8),
           Text(
             formatListTime(context, chat.lastActivity),
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: unread ? scheme.primary : scheme.onSurfaceVariant),
           ),
         ],
       ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      subtitle: Row(
         children: [
-          if (other?.hasUsername ?? false)
-            Text(
-              '@${other!.username}',
+          Expanded(
+            child: Text(
+              snippet,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+              style: unread ? TextStyle(color: scheme.onSurface, fontWeight: FontWeight.w500) : null,
             ),
-          Text(snippet, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+          if (unread)
+            Container(
+              margin: const EdgeInsets.only(left: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              constraints: const BoxConstraints(minWidth: 22),
+              decoration: BoxDecoration(
+                color: chat.isMuted ? scheme.onSurfaceVariant : scheme.primary,
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: Text(
+                chat.unreadCount > 99 ? '99+' : '${chat.unreadCount}',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: scheme.onPrimary, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ),
         ],
       ),
     );
@@ -455,7 +596,7 @@ class _UserSearchState extends State<_UserSearch> {
           title: Text(message, style: TextStyle(color: Theme.of(context).colorScheme.error)),
         ),
       _Found(:final profile) => ListTile(
-          leading: Avatar(name: profile.name),
+          leading: Avatar(name: profile.name, imageUrl: profile.avatarImageUrl),
           title: Text(profile.name, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text('@${profile.username}'),
           trailing: FilledButton(

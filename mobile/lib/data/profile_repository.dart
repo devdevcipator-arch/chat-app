@@ -1,19 +1,20 @@
+import 'dart:io';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/api.dart';
 import '../core/supabase.dart';
 import '../models/profile.dart';
 
-/// Profile reads/writes. All calls run as the signed-in user under RLS.
+/// Profile reads/writes. Database calls run as the signed-in user under RLS;
+/// avatar uploads go through the web API (presigned R2 PUT).
 abstract final class ProfileRepository {
-  static const _columns = 'id, username, display_name, avatar_url';
+  static const _columns = 'id, username, display_name, avatar_url, theme_preference';
+  static const displayNameMax = 50;
 
   /// The signed-in user's own profile (created by the signup trigger).
   static Future<Profile> fetchMine(String userId) async {
-    final row = await supabase
-        .from('profiles')
-        .select(_columns)
-        .eq('id', userId)
-        .maybeSingle();
+    final row = await supabase.from('profiles').select(_columns).eq('id', userId).maybeSingle();
     return row == null ? Profile(id: userId) : Profile.fromMap(row);
   }
 
@@ -25,6 +26,16 @@ abstract final class ProfileRepository {
     ) as List<dynamic>;
     if (rows.isEmpty) return null;
     return Profile.fromMap(rows.first as Map<String, dynamic>);
+  }
+
+  /// A contact's public profile (RLS: self and people I share a chat with).
+  static Future<Profile?> fetchPublic(String userId) async {
+    final row = await supabase
+        .from('profiles')
+        .select('id, username, display_name, avatar_url')
+        .eq('id', userId)
+        .maybeSingle();
+    return row == null ? null : Profile.fromMap(row);
   }
 
   /// Sets username + display name. Throws [PostgrestException] on failure
@@ -49,4 +60,46 @@ abstract final class ProfileRepository {
     }
     return Profile.fromMap(row);
   }
+
+  /// Trims and collapses whitespace; an empty name clears it.
+  static String normalizeDisplayName(String value) => value.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+  static Future<Profile> updateDisplayName(String userId, String displayName) async {
+    final name = normalizeDisplayName(displayName);
+    final row = await supabase
+        .from('profiles')
+        .update({'display_name': name.isEmpty ? null : name})
+        .eq('id', userId)
+        .select(_columns)
+        .single();
+    return Profile.fromMap(row);
+  }
+
+  /// Uploads an already-resized JPEG/PNG/WebP and makes it the avatar.
+  /// Returns the new object key.
+  static Future<String> uploadAvatar(File file) async {
+    final size = await file.length();
+    final lower = file.path.toLowerCase();
+    final type = lower.endsWith('.png')
+        ? 'image/png'
+        : lower.endsWith('.webp')
+            ? 'image/webp'
+            : 'image/jpeg';
+    if (size > 1024 * 1024) throw const ApiException('That photo is too large.');
+
+    final target = await Api.post('/api/profile/avatar/upload-url', {'fileType': type, 'fileSize': size});
+    await Api.uploadFile(
+      uploadUrl: target['uploadUrl'] as String,
+      headers: stringMap(target['headers']),
+      file: file,
+      length: size,
+    );
+    final result = await Api.put('/api/profile/avatar', {
+      'fileId': target['fileId'],
+      'fileType': target['fileType'] ?? type,
+    });
+    return result['avatarUrl'] as String;
+  }
+
+  static Future<void> removeAvatar() => Api.delete('/api/profile/avatar');
 }
