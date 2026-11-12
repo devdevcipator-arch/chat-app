@@ -52,9 +52,14 @@ export async function getApiAuth(): Promise<{ supabase: SupabaseClient<Database>
         auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
       },
     );
-    const { data } = await supabase.auth.getClaims(token);
-    const userId = data?.claims?.sub;
-    return userId ? { supabase, userId } : null;
+    try {
+      // Throws (rather than returning an error) for a malformed JWT.
+      const { data } = await supabase.auth.getClaims(token);
+      const userId = data?.claims?.sub;
+      return userId ? { supabase, userId } : null;
+    } catch {
+      return null; // → 401, never a 500
+    }
   }
 
   const supabase = await createClient();
