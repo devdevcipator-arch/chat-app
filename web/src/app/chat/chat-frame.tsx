@@ -26,7 +26,7 @@ export function ChatFrame({ sidebar, children }: { sidebar: ReactNode; children:
       <Suspense fallback={null}>
         <ChatOpenMarker />
       </Suspense>
-      <aside className="flex w-full shrink-0 flex-col border-zinc-200 bg-zinc-50 md:w-80 md:border-r max-md:group-has-[[data-chat-open]]/frame:hidden dark:border-zinc-800 dark:bg-zinc-950">
+      <aside className="flex w-full shrink-0 flex-col border-zinc-200 bg-zinc-50 md:w-96 md:flex-row md:border-r max-md:group-has-[[data-chat-open]]/frame:hidden dark:border-zinc-800 dark:bg-zinc-950">
         {sidebar}
       </aside>
       <main className="min-w-0 flex-1 max-md:hidden max-md:group-has-[[data-chat-open]]/frame:flex md:flex">

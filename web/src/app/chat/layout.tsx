@@ -37,6 +37,17 @@ async function SidebarLoader() {
 
 function SidebarSkeleton() {
   return (
+    <>
+      {/* Same shape as the real sidebar: rail on desktop, tab bar on mobile. */}
+      <div className="hidden w-16 shrink-0 border-r border-zinc-200 bg-zinc-100/80 md:block dark:border-zinc-800 dark:bg-zinc-950" />
+      <SidebarListSkeleton />
+      <div className="h-16 shrink-0 border-t border-zinc-200 md:hidden dark:border-zinc-800" />
+    </>
+  );
+}
+
+function SidebarListSkeleton() {
+  return (
     <div className="flex flex-1 animate-pulse flex-col gap-4 p-4">
       <div className="h-6 w-20 rounded bg-zinc-200 dark:bg-zinc-800" />
       <div className="h-9 rounded-lg bg-zinc-200 dark:bg-zinc-800" />

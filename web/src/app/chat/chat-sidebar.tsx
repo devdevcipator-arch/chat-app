@@ -20,10 +20,12 @@ import {
 } from "@/lib/chat";
 import { pageIsActive, playMessageSound, showMessageNotification } from "@/lib/notify";
 import { createClient } from "@/lib/supabase/client";
+import { CallsPanel } from "./calls-panel";
 import { ChatMenu } from "./chat-menu";
 import { NewGroupButton } from "./new-group-dialog";
 import { NotificationPrompt } from "./notification-prompt";
 import { SignOutButton } from "./sign-out-button";
+import { BottomNav, GalleryIcon, NavRail, type SidebarTab, type TabBadges } from "./sidebar-nav";
 import { usePageActive, useUnreadTitle } from "./use-page-attention";
 import { UserSearch } from "./user-search";
 
@@ -234,75 +236,144 @@ export function ChatSidebar({
 
   const myName = me.displayName || me.username;
 
+  // Which list shows. Opening a chat of the other kind (a link, a
+  // notification) switches to its tab so it stays visible in the list.
+  const [tab, setTab] = useState<SidebarTab>("chats");
+  const [syncedChatId, setSyncedChatId] = useState(activeChatId);
+  if (syncedChatId !== activeChatId) {
+    setSyncedChatId(activeChatId);
+    const open = chats.find((c) => c.chatId === activeChatId);
+    if (open && tab !== "calls") setTab(open.type === "group" ? "groups" : "chats");
+  }
+
+  const [groupFilter, setGroupFilter] = useState("");
+  const directChats = chats.filter((c) => c.type !== "group");
+  const allGroups = chats.filter((c) => c.type === "group");
+  const groupQuery = groupFilter.trim().toLowerCase();
+  const groupChats = groupQuery
+    ? allGroups.filter((c) => chatName(c).toLowerCase().includes(groupQuery))
+    : allGroups;
+  const unreadOf = (list: ChatSummary[]) =>
+    list.reduce((sum, c) => sum + (c.isMuted || c.chatId === activeChatId ? 0 : c.unreadCount), 0);
+  const badges: TabBadges = { chats: unreadOf(directChats), groups: unreadOf(allGroups) };
+
   return (
     <>
-      <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
-        <h1 className="text-lg font-semibold tracking-tight">Chats</h1>
-        <div className="flex items-center gap-0.5">
-          <Link
-            href="/gallery"
-            title="My Gallery"
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-indigo-600 transition hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950/50"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="size-4"
-              aria-hidden
+      <NavRail
+        active={tab}
+        onChange={setTab}
+        badges={badges}
+        me={{ name: myName, username: me.username, avatarUrl: me.avatarUrl }}
+      />
+
+      <div className="flex min-h-0 w-full flex-1 flex-col md:w-80 md:flex-none">
+        <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
+          <h1 className="text-lg font-semibold tracking-tight">{TAB_TITLES[tab]}</h1>
+          <div className="flex items-center gap-0.5">
+            {tab === "groups" && (
+              <NewGroupButton
+                meId={me.id}
+                onCreated={async () => {
+                  await refresh();
+                }}
+              />
+            )}
+            {/* On desktop the gallery and profile live in the rail. */}
+            <Link
+              href="/gallery"
+              title="My Gallery"
+              aria-label="My Gallery"
+              className="flex size-9 items-center justify-center rounded-full text-indigo-600 transition hover:bg-indigo-50 md:hidden dark:text-indigo-400 dark:hover:bg-indigo-950/50"
             >
-              <rect x="3" y="3" width="18" height="18" rx="3" />
-              <circle cx="9" cy="9" r="2" />
-              <path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
-            </svg>
-            Gallery
-          </Link>
-          <NewGroupButton
-            meId={me.id}
-            onCreated={async () => {
-              await refresh();
-            }}
-          />
+              <GalleryIcon />
+            </Link>
+            <Link
+              href="/settings/profile"
+              aria-label={`${myName}, @${me.username}: profile and settings`}
+              className="ml-1 rounded-full md:hidden"
+            >
+              <Avatar name={myName} src={me.avatarUrl} size="sm" />
+            </Link>
+          </div>
+        </div>
+
+        {tab === "chats" && <UserSearch meId={me.id} onStartChat={startChat} />}
+        {tab === "groups" && (
+          <div className="px-3">
+            <input
+              type="search"
+              value={groupFilter}
+              onChange={(e) => setGroupFilter(e.target.value)}
+              placeholder="Search groups"
+              aria-label="Search groups"
+              autoComplete="off"
+              className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-900"
+            />
+          </div>
+        )}
+        {tab !== "calls" && <NotificationPrompt />}
+
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {tab === "calls" ? (
+            <CallsPanel meId={me.id} chats={chats} />
+          ) : (
+            <ChatList
+              chats={tab === "groups" ? groupChats : directChats}
+              meId={me.id}
+              activeChatId={activeChatId}
+              empty={
+                tab === "groups"
+                  ? groupQuery
+                    ? "No groups match your search."
+                    : "No groups yet. Create one with “New group”."
+                  : "No conversations yet. Search for an @username to start one."
+              }
+            />
+          )}
+        </div>
+
+        <ThemeSync preference={me.themePreference} />
+        {/* Sign out is in the rail on desktop. */}
+        <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-3 py-1 md:block md:border-0 md:pb-2 dark:border-zinc-800">
+          <PoweredBy />
+          <div className="md:hidden">
+            <SignOutButton />
+          </div>
         </div>
       </div>
 
-      <UserSearch meId={me.id} onStartChat={startChat} />
-      <NotificationPrompt />
-
-      <nav aria-label="Conversations" className="mt-3 min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        {chats.length === 0 ? (
-          <p className="mx-1 rounded-lg border border-dashed border-zinc-300 px-3 py-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
-            No conversations yet. Search for an @username to start one, or create a group.
-          </p>
-        ) : (
-          <ul className="space-y-0.5">
-            {chats.map((chat) => (
-              <ChatRow key={chat.chatId} chat={chat} meId={me.id} active={chat.chatId === activeChatId} />
-            ))}
-          </ul>
-        )}
-      </nav>
-
-      <ThemeSync preference={me.themePreference} />
-      <div className="flex items-center gap-1 border-t border-zinc-200 p-2 dark:border-zinc-800">
-        <Link
-          href="/settings/profile"
-          aria-label={`${myName}, @${me.username}: profile and settings`}
-          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 transition hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60"
-        >
-          <Avatar name={myName} src={me.avatarUrl} />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{myName}</p>
-            <p className="truncate text-xs text-zinc-500">@{me.username}</p>
-          </div>
-        </Link>
-        <SignOutButton />
-      </div>
-      <PoweredBy className="pb-2" />
+      <BottomNav active={tab} onChange={setTab} badges={badges} />
     </>
+  );
+}
+
+const TAB_TITLES: Record<SidebarTab, string> = { chats: "Chats", groups: "Groups", calls: "Calls" };
+
+function ChatList({
+  chats,
+  meId,
+  activeChatId,
+  empty,
+}: {
+  chats: ChatSummary[];
+  meId: string;
+  activeChatId: string | null;
+  empty: string;
+}) {
+  return (
+    <nav aria-label="Conversations" className="px-2 pb-2">
+      {chats.length === 0 ? (
+        <p className="mx-1 rounded-lg border border-dashed border-zinc-300 px-3 py-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
+          {empty}
+        </p>
+      ) : (
+        <ul className="space-y-0.5">
+          {chats.map((chat) => (
+            <ChatRow key={chat.chatId} chat={chat} meId={meId} active={chat.chatId === activeChatId} />
+          ))}
+        </ul>
+      )}
+    </nav>
   );
 }
 
