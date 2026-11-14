@@ -11,6 +11,7 @@ import '../core/api.dart';
 import '../core/config.dart';
 import '../core/errors.dart';
 import '../core/ids.dart';
+import '../core/math_evaluator.dart';
 import '../core/media.dart';
 import '../core/supabase.dart';
 import '../core/time_format.dart';
@@ -24,6 +25,7 @@ import '../models/profile.dart';
 import '../services/call_controller.dart';
 import '../widgets/audio_player.dart';
 import '../widgets/avatar.dart';
+import '../widgets/math_result_card.dart';
 import '../widgets/media_views.dart';
 import '../widgets/voice_recorder.dart';
 import 'group_info_screen.dart';
@@ -207,23 +209,44 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // --- Sending ---------------------------------------------------------------
 
+  ChatMessage _optimisticText(String content, [DateTime? at]) => ChatMessage(
+        id: uuidV4(),
+        chatId: widget.chatId,
+        senderId: _meId,
+        type: 'text',
+        content: content,
+        mediaUrl: null,
+        createdAt: (at ?? DateTime.now()).toUtc(),
+        status: MessageStatus.sending,
+      );
+
   void _sendText(String content) {
-    final optimistic = ChatMessage(
-      id: uuidV4(),
-      chatId: widget.chatId,
-      senderId: _meId,
-      type: 'text',
-      content: content,
-      mediaUrl: null,
-      createdAt: DateTime.now().toUtc(),
-      status: MessageStatus.sending,
-    );
+    final optimistic = _optimisticText(content);
     setState(() => _messages = mergeMessages(_messages, [optimistic]));
     unawaited(_deliverText(optimistic));
   }
 
-  Future<void> _deliverText(ChatMessage message) async {
+  /// `/math`: the command as typed, then the answer as an ordinary text message.
+  void _sendMath(String expression, String formatted) {
+    final now = DateTime.now();
+    final question = _optimisticText('/math $expression', now);
+    final answer = _optimisticText(mathResultMessage(expression, formatted), now.add(const Duration(milliseconds: 1)));
+    setState(() => _messages = mergeMessages(_messages, [question, answer]));
+    // One after the other: the server stamps created_at, so inserting both at
+    // once could put the answer above the question.
+    unawaited(() async {
+      if (await _deliverText(question)) {
+        await _deliverText(answer);
+      } else if (mounted) {
+        setState(() => _messages = mergeMessages(_messages, [answer.copyWith(status: MessageStatus.failed)]));
+      }
+    }());
+  }
+
+  /// Whether it went through; failures are marked on the bubble for Retry.
+  Future<bool> _deliverText(ChatMessage message) async {
     ChatMessage result;
+    var ok = true;
     try {
       result = await ChatRepository.sendText(
         id: message.id,
@@ -233,8 +256,10 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     } catch (_) {
       result = message.copyWith(status: MessageStatus.failed);
+      ok = false;
     }
     if (mounted) setState(() => _messages = mergeMessages(_messages, [result]));
+    return ok;
   }
 
   void _sendFile(File file, String fileName, {int? durationSeconds}) {
@@ -639,6 +664,8 @@ class _ChatScreenState extends State<ChatScreen> {
             else
               _Composer(
                 onSend: _sendText,
+                onSendMath: _sendMath,
+                onNotice: _showSnack,
                 onAttach: _openAttachMenu,
                 onRecord: () => setState(() => _recording = true),
               ),
@@ -844,6 +871,10 @@ class _MessageBubble extends StatelessWidget {
     final local = message.localPath;
     switch (message.type) {
       case 'text':
+        final math = parseMathResultMessage(message.content);
+        if (math != null) {
+          return MathResultCard(expression: math.expression, result: math.result, mine: mine, foreground: textColor);
+        }
         return Text(message.content ?? '', style: TextStyle(color: textColor, fontSize: 15, height: 1.3));
       case 'image':
         final Widget image = local != null && File(local).existsSync()
@@ -965,9 +996,19 @@ class _FileTile extends StatelessWidget {
 }
 
 class _Composer extends StatefulWidget {
-  const _Composer({required this.onSend, required this.onAttach, required this.onRecord});
+  const _Composer({
+    required this.onSend,
+    required this.onSendMath,
+    required this.onNotice,
+    required this.onAttach,
+    required this.onRecord,
+  });
 
   final ValueChanged<String> onSend;
+
+  /// A valid `/math` command, already evaluated: (expression, formatted result).
+  final void Function(String expression, String formatted) onSendMath;
+  final ValueChanged<String> onNotice;
   final VoidCallback onAttach;
   final VoidCallback onRecord;
 
@@ -989,20 +1030,131 @@ class _ComposerState extends State<_Composer> {
   void _submit() {
     final content = _controller.text.trim();
     if (content.isEmpty) return;
-    widget.onSend(content);
+    if (isMathCommand(content)) {
+      // Never send a broken command as text.
+      final expression = parseMathCommand(content) ?? '';
+      switch (evaluateMath(expression)) {
+        case MathOk(:final formatted) when expression.isNotEmpty:
+          widget.onSendMath(expression, formatted);
+        case MathError(:final error):
+          widget.onNotice('Invalid math expression: $error');
+          return;
+        default:
+          widget.onNotice('Invalid math expression');
+          return;
+      }
+    } else {
+      widget.onSend(content);
+    }
     _controller.clear();
     setState(() {});
     _focus.requestFocus();
+  }
+
+  void _completeMath() {
+    _controller.value = const TextEditingValue(text: '/math ', selection: TextSelection.collapsed(offset: 6));
+    setState(() {});
+    _focus.requestFocus();
+  }
+
+  /// Hint / live result above the input while a `/math` command is typed.
+  Widget? _mathBar(BuildContext context) {
+    final text = _controller.text;
+    final expression = parseMathCommand(text);
+    if (expression == null) return null;
+    final scheme = Theme.of(context).colorScheme;
+    final muted = TextStyle(color: scheme.onSurfaceVariant, fontSize: 13);
+    final mono = TextStyle(fontFamily: 'monospace', color: scheme.onSurface, fontSize: 13);
+
+    Widget content;
+    VoidCallback? onTap;
+    if (expression.isEmpty) {
+      onTap = isMathCommand(text) ? null : _completeMath; // "/" … "/mat": tap fills in "/math "
+      content = Text.rich(
+        TextSpan(children: [
+          TextSpan(text: '/math', style: mono.copyWith(color: scheme.primary, fontWeight: FontWeight.w700)),
+          TextSpan(text: ' [expression]', style: mono),
+          const TextSpan(text: ' — Instant calculator (e.g. '),
+          TextSpan(text: '/math (120 * 4) / 3', style: mono),
+          const TextSpan(text: ')'),
+        ]),
+        style: muted,
+      );
+    } else {
+      content = switch (evaluateMath(expression)) {
+        MathOk(:final formatted) => Text(
+            '= $formatted',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: scheme.primary,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        MathError(:final error) => Text(
+            error,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: Colors.amber.shade700, fontSize: 13),
+          ),
+      };
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+      child: Material(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            child: Semantics(
+              liveRegion: true,
+              child: Row(
+                children: [
+                  const Text('🧮', style: TextStyle(fontSize: 18)),
+                  const SizedBox(width: 10),
+                  Expanded(child: content),
+                  if (onTap != null) ...[
+                    const SizedBox(width: 8),
+                    Text('Tap to use', style: muted.copyWith(fontSize: 11)),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final empty = _controller.text.trim().isEmpty;
+    final mathBar = _mathBar(context);
     return Container(
-      padding: const EdgeInsets.fromLTRB(4, 8, 8, 8),
       decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant))),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedSize(
+            duration: const Duration(milliseconds: 150),
+            alignment: Alignment.bottomCenter,
+            child: mathBar ?? const SizedBox(width: double.infinity),
+          ),
+          Padding(padding: const EdgeInsets.fromLTRB(4, 8, 8, 8), child: _inputRow(scheme, empty)),
+        ],
+      ),
+    );
+  }
+
+  Widget _inputRow(ColorScheme scheme, bool empty) {
+    return Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           IconButton(tooltip: 'Attach', onPressed: widget.onAttach, icon: const Icon(Icons.add_circle_outline)),
@@ -1032,7 +1184,6 @@ class _ComposerState extends State<_Composer> {
               ? IconButton.filled(tooltip: 'Record voice message', onPressed: widget.onRecord, icon: const Icon(Icons.mic))
               : IconButton.filled(tooltip: 'Send', onPressed: _submit, icon: const Icon(Icons.send_rounded)),
         ],
-      ),
     );
   }
 }

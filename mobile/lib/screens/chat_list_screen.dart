@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/errors.dart';
 import '../core/supabase.dart';
@@ -14,6 +15,7 @@ import '../models/chat_summary.dart';
 import '../models/profile.dart';
 import '../services/call_controller.dart';
 import '../widgets/avatar.dart';
+import 'calls_tab.dart';
 import 'chat_screen.dart';
 import 'gallery_screen.dart';
 import 'new_group_screen.dart';
@@ -57,6 +59,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   void dispose() {
     _refreshDebounce?.cancel();
+    _groupFilter.dispose();
     final channel = _channel;
     if (channel != null) unawaited(supabase.removeChannel(channel));
     super.dispose();
@@ -256,12 +259,49 @@ class _ChatListScreenState extends State<ChatListScreen> {
     }
   }
 
+  // --- Tabs: Chats / Groups / Calls (same sections as the web sidebar) ---------
+
+  int _tab = 0;
+  bool _callsVisited = false;
+  final _groupFilter = TextEditingController();
+
+  static const _titles = ['Chats', 'Groups', 'Calls'];
+
+  int _unreadOf(Iterable<ChatSummary> chats) =>
+      chats.fold(0, (sum, c) => sum + (c.isMuted || c.chatId == _openChatId ? 0 : c.unreadCount));
+
+  Future<void> _confirmSignOut() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sign out?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Sign out')),
+        ],
+      ),
+    );
+    if (ok == true) await supabase.auth.signOut();
+  }
+
+  Widget _badgeIcon(IconData icon, int count) => Badge(
+        isLabelVisible: count > 0,
+        label: Text(count > 99 ? '99+' : '$count'),
+        child: Icon(icon),
+      );
+
   @override
   Widget build(BuildContext context) {
     final me = _me;
+    final scheme = Theme.of(context).colorScheme;
+    final direct = _chats.where((c) => !c.isGroup).toList();
+    final allGroups = _chats.where((c) => c.isGroup).toList();
+    final query = _groupFilter.text.trim().toLowerCase();
+    final groups = query.isEmpty ? allGroups : allGroups.where((c) => c.name.toLowerCase().contains(query)).toList();
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Chats'),
+        title: Text(_titles[_tab]),
         actions: [
           IconButton(tooltip: 'Gallery', onPressed: _openGallery, icon: const Icon(Icons.photo_library_outlined)),
           IconButton(
@@ -272,24 +312,133 @@ class _ChatListScreenState extends State<ChatListScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        tooltip: 'New group',
-        onPressed: _newGroup,
-        child: const Icon(Icons.group_add_outlined),
-      ),
-      body: Column(
+      floatingActionButton: _tab == 1
+          ? FloatingActionButton(
+              tooltip: 'New group',
+              onPressed: _newGroup,
+              child: const Icon(Icons.group_add_outlined),
+            )
+          : null,
+      body: IndexedStack(
+        index: _tab,
         children: [
-          _UserSearch(meId: me.id, onStartChat: _startChat),
-          Expanded(child: _buildList(context)),
+          Column(
+            children: [
+              _UserSearch(meId: me.id, onStartChat: _startChat),
+              Expanded(
+                child: _buildList(context, direct, 'No conversations yet.\nSearch for an @username to start one.'),
+              ),
+            ],
+          ),
+          Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: TextField(
+                  controller: _groupFilter,
+                  onChanged: (_) => setState(() {}),
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: 'Search groups',
+                    prefixIcon: const Icon(Icons.search),
+                    isDense: true,
+                    filled: true,
+                    fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: _buildList(
+                  context,
+                  groups,
+                  query.isNotEmpty ? 'No groups match your search.' : 'No groups yet.\nTap + to create one.',
+                ),
+              ),
+            ],
+          ),
+          // Built on first visit, so the call history isn't fetched at launch.
+          if (_callsVisited)
+            CallsTab(
+              meId: me.id,
+              chats: _chats,
+              onOpenChat: (chatId) => _openChat(chatId, summary: _chats.where((c) => c.chatId == chatId).firstOrNull),
+            )
+          else
+            const SizedBox.shrink(),
+        ],
+      ),
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // The footer below handles the bottom safe area. `context` is from
+          // outside the Scaffold, so the status-bar inset must be removed here
+          // too, or NavigationBar's SafeArea pads the top of the bar with it.
+          MediaQuery.removePadding(
+            context: context,
+            removeTop: true,
+            removeBottom: true,
+            child: NavigationBar(
+              // Default is 80; keep it tight so the bar plus footer don't eat the screen.
+              height: 60,
+              labelPadding: const EdgeInsets.only(top: 2),
+              selectedIndex: _tab,
+              onDestinationSelected: (i) => setState(() {
+                _tab = i;
+                if (i == 2) _callsVisited = true;
+              }),
+              destinations: [
+                NavigationDestination(
+                  icon: _badgeIcon(Icons.chat_bubble_outline, _unreadOf(direct)),
+                  selectedIcon: _badgeIcon(Icons.chat_bubble, _unreadOf(direct)),
+                  label: 'Chats',
+                ),
+                NavigationDestination(
+                  icon: _badgeIcon(Icons.group_outlined, _unreadOf(allGroups)),
+                  selectedIcon: _badgeIcon(Icons.group, _unreadOf(allGroups)),
+                  label: 'Groups',
+                ),
+                const NavigationDestination(icon: Icon(Icons.call_outlined), selectedIcon: Icon(Icons.call), label: 'Calls'),
+              ],
+            ),
+          ),
+          // Footer: the very last thing on the screen, under the tab bar.
+          DecoratedBox(
+            decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant))),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    const Expanded(child: _PoweredBy()),
+                    TextButton.icon(
+                      onPressed: _confirmSignOut,
+                      style: TextButton.styleFrom(
+                        foregroundColor: scheme.onSurfaceVariant,
+                        visualDensity: VisualDensity.compact,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        minimumSize: const Size(0, 32),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                      ),
+                      icon: const Icon(Icons.logout, size: 16),
+                      label: const Text('Sign out'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildList(BuildContext context) {
+  Widget _buildList(BuildContext context, List<ChatSummary> chats, String empty) {
     if (_loading) return const Center(child: CircularProgressIndicator());
 
-    if (_loadError != null && _chats.isEmpty) {
+    if (_loadError != null && chats.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -307,31 +456,58 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
     return RefreshIndicator(
       onRefresh: _refresh,
-      child: _chats.isEmpty
+      child: chats.isEmpty
           ? ListView(
               physics: const AlwaysScrollableScrollPhysics(),
-              children: const [
+              children: [
                 Padding(
-                  padding: EdgeInsets.fromLTRB(32, 64, 32, 0),
-                  child: Text(
-                    'No conversations yet.\nSearch for an @username to start one, or create a group.',
-                    textAlign: TextAlign.center,
-                  ),
+                  padding: const EdgeInsets.fromLTRB(32, 64, 32, 0),
+                  child: Text(empty, textAlign: TextAlign.center),
                 ),
               ],
             )
           : ListView.separated(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.only(bottom: 88),
-              itemCount: _chats.length,
+              itemCount: chats.length,
               separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
               itemBuilder: (context, i) => _ChatTile(
-                chat: _chats[i],
+                chat: chats[i],
                 meId: _me.id,
-                onTap: () => _openChat(_chats[i].chatId, summary: _chats[i]),
-                onLongPress: () => _chatActions(_chats[i]),
+                onTap: () => _openChat(chats[i].chatId, summary: chats[i]),
+                onLongPress: () => _chatActions(chats[i]),
               ),
             ),
+    );
+  }
+}
+
+/// "Powered by Devcipator", linking to the company site (as on the web).
+class _PoweredBy extends StatelessWidget {
+  const _PoweredBy();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () => launchUrl(Uri.parse('https://www.devcipator.com/'), mode: LaunchMode.externalApplication),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Text.rich(
+            TextSpan(children: [
+              const TextSpan(text: 'Powered by '),
+              TextSpan(
+                text: 'Devcipator',
+                style: TextStyle(fontWeight: FontWeight.w600, color: scheme.onSurface.withValues(alpha: 0.8)),
+              ),
+            ]),
+            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+          ),
+        ),
+      ),
     );
   }
 }
