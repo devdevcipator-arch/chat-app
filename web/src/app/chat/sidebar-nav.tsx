@@ -101,9 +101,18 @@ export function NavRail({
   return (
     <nav
       aria-label="Sections"
-      className="hidden w-16 shrink-0 flex-col items-center justify-between border-r border-zinc-200 bg-zinc-100/80 py-3 md:flex dark:border-zinc-800 dark:bg-zinc-950"
+      className="hidden w-20 shrink-0 flex-col items-center border-r border-zinc-200 bg-zinc-100/80 pt-5 pb-4 md:flex dark:border-zinc-800 dark:bg-zinc-950"
     >
-      <ul className="flex flex-col items-center gap-2">
+      <Link
+        href="/settings/profile"
+        title="Profile & settings"
+        aria-label={`${me.name}, @${me.username}: profile and settings`}
+        className="rounded-full ring-2 ring-zinc-300 transition hover:ring-indigo-500 dark:ring-zinc-700"
+      >
+        <Avatar name={me.name} src={me.avatarUrl} size="md" />
+      </Link>
+
+      <ul className="mt-8 flex flex-col items-center gap-6">
         {TABS.map(({ id, label, icon: Icon }) => {
           const selected = active === id;
           return (
@@ -113,20 +122,20 @@ export function NavRail({
                 onClick={() => onChange(id)}
                 aria-current={selected ? "page" : undefined}
                 aria-label={tabLabel(label, badges[id])}
-                className={`group/tab flex w-14 flex-col items-center gap-1 rounded-xl py-1.5 text-[10px] font-medium transition ${
+                className={`group/tab flex w-16 flex-col items-center gap-1.5 text-xs font-medium transition ${
                   selected
-                    ? "text-indigo-600 dark:text-indigo-400"
+                    ? "text-indigo-600 dark:text-indigo-500"
                     : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
                 }`}
               >
                 <span
-                  className={`relative flex h-8 w-12 items-center justify-center rounded-full transition ${
+                  className={`relative flex size-12 items-center justify-center rounded-2xl transition ${
                     selected
-                      ? "bg-indigo-100 dark:bg-indigo-950/70"
+                      ? "bg-indigo-100 dark:bg-indigo-950"
                       : "group-hover/tab:bg-zinc-200/80 dark:group-hover/tab:bg-zinc-800/70"
                   }`}
                 >
-                  <Icon />
+                  <Icon className="size-6" />
                   <Badge count={badges[id] ?? 0} />
                 </span>
                 {label}
@@ -136,33 +145,26 @@ export function NavRail({
         })}
       </ul>
 
-      <div className="flex flex-col items-center gap-2">
+      <div className="mt-auto flex flex-col items-center gap-3">
         <Link
           href="/gallery"
           title="My Gallery"
           aria-label="My Gallery"
-          className="flex size-10 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-200/80 hover:text-indigo-600 dark:hover:bg-zinc-800/70 dark:hover:text-indigo-400"
+          className="flex size-10 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-200/80 hover:text-indigo-600 dark:hover:bg-zinc-800/70 dark:hover:text-indigo-400"
         >
-          <GalleryIcon />
+          <GalleryIcon className="size-6" />
         </Link>
         <form action={signOut}>
           <button
             type="submit"
             title="Sign out"
             aria-label="Sign out"
-            className="flex size-10 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-200/80 hover:text-zinc-900 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
+            className="flex size-10 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-200/80 hover:text-zinc-900 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
           >
-            <LogOutIcon />
+            <LogOutIcon className="size-6" />
           </button>
         </form>
-        <Link
-          href="/settings/profile"
-          title="Profile & settings"
-          aria-label={`${me.name}, @${me.username}: profile and settings`}
-          className="rounded-full ring-indigo-500/40 transition hover:ring-4"
-        >
-          <Avatar name={me.name} src={me.avatarUrl} size="sm" />
-        </Link>
+        <div aria-hidden className="mt-2 h-px w-12 bg-zinc-200 dark:bg-zinc-800" />
       </div>
     </nav>
   );

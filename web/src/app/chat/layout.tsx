@@ -39,7 +39,7 @@ function SidebarSkeleton() {
   return (
     <>
       {/* Same shape as the real sidebar: rail on desktop, tab bar on mobile. */}
-      <div className="hidden w-16 shrink-0 border-r border-zinc-200 bg-zinc-100/80 md:block dark:border-zinc-800 dark:bg-zinc-950" />
+      <div className="hidden w-20 shrink-0 border-r border-zinc-200 bg-zinc-100/80 md:block dark:border-zinc-800 dark:bg-zinc-950" />
       <SidebarListSkeleton />
       <div className="h-16 shrink-0 border-t border-zinc-200 md:hidden dark:border-zinc-800" />
     </>
