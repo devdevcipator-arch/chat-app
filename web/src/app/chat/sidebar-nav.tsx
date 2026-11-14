@@ -183,7 +183,7 @@ export function BottomNav({
   return (
     <nav
       aria-label="Sections"
-      className="grid h-16 shrink-0 grid-cols-3 border-t border-zinc-200 bg-zinc-50 pb-[env(safe-area-inset-bottom)] md:hidden max-md:group-has-[[data-chat-open]]/frame:hidden dark:border-zinc-800 dark:bg-zinc-950"
+      className="grid h-16 shrink-0 grid-cols-3 border-t border-zinc-200 bg-zinc-50 md:hidden max-md:group-has-[[data-chat-open]]/frame:hidden dark:border-zinc-800 dark:bg-zinc-950"
     >
       {TABS.map(({ id, label, icon: Icon }) => {
         const selected = active === id;

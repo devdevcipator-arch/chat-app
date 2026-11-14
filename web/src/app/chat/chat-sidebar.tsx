@@ -333,16 +333,18 @@ export function ChatSidebar({
         </div>
 
         <ThemeSync preference={me.themePreference} />
-        {/* Sign out is in the rail on desktop. */}
-        <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-3 py-1 md:block md:border-0 md:pb-2 dark:border-zinc-800">
+        {/* Desktop footer; sign out is in the rail there. */}
+        <div className="hidden px-3 pb-2 md:block">
           <PoweredBy />
-          <div className="md:hidden">
-            <SignOutButton />
-          </div>
         </div>
       </div>
 
       <BottomNav active={tab} onChange={setTab} badges={badges} />
+      {/* Mobile footer: the very last thing on the page, under the tab bar. */}
+      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-zinc-200 px-3 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] md:hidden dark:border-zinc-800">
+        <PoweredBy />
+        <SignOutButton />
+      </div>
     </>
   );
 }
