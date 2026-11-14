@@ -43,12 +43,14 @@ import { EditError, editMessage } from "@/lib/message-edit";
 import { createClient } from "@/lib/supabase/client";
 import { formatBytes } from "@/lib/vault";
 import { markVoicemailPlayed } from "@/lib/voicemail-client";
+import { evaluateMath, mathResultMessage, parseMathCommand, parseMathResultMessage } from "@/lib/math-evaluator";
 import { CallButton } from "../call/call-button";
 import { GroupCallBanner } from "../call/group-call-banner";
 import { ChatMenu } from "../chat-menu";
 import { AttachMenu } from "./attach-menu";
 import { GalleryPicker } from "./gallery-picker";
 import { GroupInfo } from "./group-info";
+import { MathResultCard } from "./math-result-card";
 import { AudioMessage, FileMessage, ImageMessage, Lightbox, VideoMessage } from "./media";
 import { VOICE_NOTE_MAX_SECONDS, VoiceNoteBar } from "./voice-note-bar";
 import { VoicemailMessage } from "./voicemail-message";
@@ -219,19 +221,22 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
 
   // --- Text -----------------------------------------------------------------
 
+  /** Whether it went through; failures are marked on the bubble for Retry. */
   const sendText = useCallback(
     async (message: ChatMessage) => {
       try {
         await insertMessage(message, null);
+        return true;
       } catch (e) {
         patch(message.id, { status: "failed", error: errorText(e) });
+        return false;
       }
     },
     [insertMessage, patch],
   );
 
-  function handleSendText(content: string) {
-    const optimistic: ChatMessage = {
+  function optimisticText(content: string, at = new Date()): ChatMessage {
+    return {
       id: crypto.randomUUID(),
       chat_id: chatId,
       sender_id: meId,
@@ -242,12 +247,31 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       call_id: null,
       voicemail_played_at: null,
       edited_at: null,
-      created_at: new Date().toISOString(),
+      created_at: at.toISOString(),
       status: "sending",
     };
+  }
+
+  function handleSendText(content: string) {
+    const optimistic = optimisticText(content);
     stickToBottom.current = true;
     setMessages((prev) => mergeMessages(prev, [optimistic]));
     void sendText(optimistic);
+  }
+
+  /** `/math`: the command as typed, then the answer as an ordinary text message. */
+  function handleSendMath(expression: string, formatted: string) {
+    const now = new Date();
+    const question = optimisticText(`/math ${expression}`, now);
+    const answer = optimisticText(mathResultMessage(expression, formatted), new Date(now.getTime() + 1));
+    stickToBottom.current = true;
+    setMessages((prev) => mergeMessages(prev, [question, answer]));
+    // One after the other: the server stamps created_at, so inserting both at
+    // once could put the answer above the question.
+    void (async () => {
+      if (await sendText(question)) await sendText(answer);
+      else patch(answer.id, { status: "failed", error: "Not sent" });
+    })();
   }
 
   // --- Media ----------------------------------------------------------------
@@ -579,6 +603,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
 
       <Composer
         onSend={handleSendText}
+        onSendMath={handleSendMath}
         onAttach={(file) => void handleAttach(file)}
         onSendImages={(files, caption) => void handleSendImages(files, caption)}
         onOpenGallery={() => setGalleryOpen(true)}
@@ -693,7 +718,19 @@ function MessageBubble({
     case "file":
       body = <FileMessage src={mediaSrc} name={message.content} mine={mine} />;
       break;
-    case "text":
+    case "text": {
+      const math = parseMathResultMessage(message.content);
+      if (math) {
+        body = (
+          <MathResultCard
+            expression={math.expression}
+            result={math.result}
+            mine={mine}
+            className={`${sending ? "opacity-70" : ""} ${beingEdited ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-white dark:ring-offset-zinc-950" : ""}`}
+          />
+        );
+        break;
+      }
       body = (
         <div
           className={`rounded-2xl px-3.5 py-2 text-[15px] leading-snug break-words whitespace-pre-wrap ${
@@ -706,6 +743,7 @@ function MessageBubble({
         </div>
       );
       break;
+    }
     default:
       body = (
         <div className="rounded-2xl bg-zinc-100 px-3.5 py-2 text-sm text-zinc-500 italic dark:bg-zinc-800">
@@ -816,6 +854,7 @@ function namePasted(file: File) {
 
 function Composer({
   onSend,
+  onSendMath,
   onAttach,
   onSendImages,
   onOpenGallery,
@@ -826,6 +865,8 @@ function Composer({
   onCancelEdit,
 }: {
   onSend: (content: string) => void;
+  /** A valid `/math` command, already evaluated. */
+  onSendMath: (expression: string, formatted: string) => void;
   onAttach: (file: File) => void;
   /** Pasted images, with the typed text as their caption. */
   onSendImages: (files: File[], caption: string) => void;
@@ -942,10 +983,25 @@ function Composer({
     return () => document.removeEventListener("paste", onPaste);
   }, [editingId, recording]);
 
+  // --- /math slash command ----------------------------------------------------
+
+  const mathCommand = editing || showStaged ? null : parseMathCommand(text);
+  const mathPreview = mathCommand?.kind === "expression" ? evaluateMath(mathCommand.expression) : null;
+  /** "/" … "/mat": Tab completes to "/math ". */
+  const canCompleteMath = mathCommand?.kind === "hint" && !/^\s*\/math/i.test(text);
+
   function submit(e?: FormEvent) {
     e?.preventDefault();
     const content = text.trim();
-    if (editing) {
+    if (/^\/math(\s|$)/i.test(content) && !editing && staged.length === 0) {
+      // Never send a broken command as text.
+      if (mathPreview?.ok && mathCommand?.kind === "expression") {
+        onSendMath(mathCommand.expression, mathPreview.formatted);
+        setText("");
+      } else {
+        onNotice(`Invalid math expression${mathPreview && !mathPreview.ok ? `: ${mathPreview.error}` : ""}`);
+      }
+    } else if (editing) {
       if (content) onSaveEdit(content); // the text swap above restores the draft
     } else if (staged.length > 0) {
       onSendImages(
@@ -965,6 +1021,9 @@ function Composer({
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submit();
+    } else if (e.key === "Tab" && !e.shiftKey && canCompleteMath) {
+      e.preventDefault();
+      setText("/math ");
     } else if (e.key === "Escape" && editing) {
       e.preventDefault();
       onCancelEdit();
@@ -1080,6 +1139,47 @@ function Composer({
                   ))}
                 </AnimatePresence>
               </ul>
+            </div>
+          </motion.div>
+        )}
+        {mathCommand && (
+          <motion.div
+            key="math"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.15 }}
+            className="overflow-hidden"
+          >
+            <div
+              aria-live="polite"
+              className="mx-3 mt-3 flex items-center gap-3 rounded-xl border border-zinc-200 bg-white/90 py-2 pr-3 pl-3 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/90"
+            >
+              <span aria-hidden className="text-lg leading-none">🧮</span>
+              {mathCommand.kind === "hint" ? (
+                <p className="min-w-0 flex-1 text-sm text-zinc-500">
+                  <span className="font-mono font-semibold text-indigo-600 dark:text-indigo-400">/math</span>{" "}
+                  <span className="font-mono text-zinc-700 dark:text-zinc-300">[expression]</span> — Instant calculator{" "}
+                  <span className="whitespace-nowrap">
+                    (e.g. <span className="font-mono">/math (120 * 4) / 3</span>)
+                  </span>
+                </p>
+              ) : mathPreview?.ok ? (
+                <p className="min-w-0 flex-1 truncate text-lg font-bold text-indigo-600 tabular-nums dark:text-indigo-400">
+                  = {mathPreview.formatted}
+                </p>
+              ) : (
+                <p className="min-w-0 flex-1 truncate text-sm text-amber-700 dark:text-amber-400">
+                  {mathPreview?.error ?? "Invalid math expression"}
+                </p>
+              )}
+              {canCompleteMath ? (
+                <kbd className="hidden shrink-0 rounded border border-zinc-300 px-1.5 font-sans text-[11px] text-zinc-500 sm:inline dark:border-zinc-700">
+                  Tab
+                </kbd>
+              ) : mathPreview?.ok ? (
+                <span className="hidden shrink-0 text-xs text-zinc-500 sm:inline">Enter to send</span>
+              ) : null}
             </div>
           </motion.div>
         )}
