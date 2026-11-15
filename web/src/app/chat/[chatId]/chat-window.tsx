@@ -40,7 +40,7 @@ import {
 } from "@/lib/media";
 import { UploadError, compressImage, requestUploadUrl, uploadToR2 } from "@/lib/media-client";
 import { ESCAPE_LAYER, escapeIsTaken } from "@/lib/escape";
-import { chatUploadRule, formatLimit, resolveChatFileType, type ChatUploadKind } from "@/lib/chat-upload";
+import { chatUploadRule, formatLimit, type ChatUploadKind } from "@/lib/chat-upload";
 import { EditError, editMessage } from "@/lib/message-edit";
 import { createClient } from "@/lib/supabase/client";
 import { formatBytes } from "@/lib/vault";
@@ -202,19 +202,25 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
 
   const insertMessage = useCallback(
     async (message: ChatMessage, mediaKey: string | null) => {
-      const { data, error } = await supabase
-        .from("messages")
-        .insert({
-          id: message.id,
-          chat_id: chatId,
-          sender_id: meId,
-          message_type: message.message_type,
-          content: message.content,
-          media_url: mediaKey,
-          duration_seconds: message.duration_seconds,
-        })
-        .select()
-        .single();
+      const row = {
+        id: message.id,
+        chat_id: chatId,
+        sender_id: meId,
+        message_type: message.message_type,
+        content: message.content,
+        media_url: mediaKey,
+        duration_seconds: message.duration_seconds,
+      };
+      const insert = (withSize: boolean) =>
+        supabase
+          .from("messages")
+          .insert({ ...row, ...(withSize && message.file_size != null ? { file_size: message.file_size } : {}) })
+          .select()
+          .single();
+      let { data, error } = await insert(true);
+      // The size is cosmetic: if the column isn't there yet (migration not
+      // applied), still deliver the file.
+      if (error?.code === "PGRST204") ({ data, error } = await insert(false));
       if (error || !data) throw new UploadError("Message not sent. Please try again.");
       setMessages((prev) => mergeMessages(prev, [data]));
     },
@@ -246,6 +252,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       content,
       media_url: null,
       duration_seconds: null,
+      file_size: null,
       call_id: null,
       voicemail_played_at: null,
       edited_at: null,
@@ -319,17 +326,15 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       if (image.blob.size > MAX_UPLOAD_BYTES.image) throw new UploadError("That image is too large.");
       return { blob: image.blob, type: image.type, kind: "image", fileName: file.name };
     }
-    // Audio, video and documents upload as they are, under their canonical type.
-    const type = resolveChatFileType(file);
-    const rule = type && chatUploadRule(type);
-    if (!type || !rule) {
-      throw new UploadError(`"${file.name}" can't be sent. Supported: photos, videos, audio, PDF, Word, Excel, PowerPoint, TXT, CSV and ZIP.`);
-    }
+    // Everything else (audio, video, EPUB, PDF, archives, any format except
+    // executables) uploads as is; a blank/generic type resolves from the name.
+    const rule = chatUploadRule(file.type, file.name);
+    if (!rule) throw new UploadError(`"${file.name}" is an executable file and can't be sent.`);
     if (file.size > rule.maxBytes) throw new UploadError(`"${file.name}" is larger than ${formatLimit(rule.maxBytes)}.`);
     if (file.size === 0) throw new UploadError(`"${file.name}" is empty.`);
     // Re-tag so the body matches the signed Content-Type exactly.
-    const blob = file.type === type ? file : new Blob([file], { type });
-    return { blob, type, kind: rule.kind, fileName: file.name };
+    const blob = file.type === rule.mime ? file : new Blob([file], { type: rule.mime });
+    return { blob, type: rule.mime, kind: rule.kind, fileName: file.name };
   }
 
   async function handleAttach(file: File) {
@@ -394,6 +399,8 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       content: media.kind === "video" || media.kind === "file" ? media.fileName.slice(0, 255) : media.caption || null,
       media_url: null,
       duration_seconds: media.durationSeconds ?? null,
+      // Shown on file cards ("2.4 MB").
+      file_size: media.kind === "file" ? media.blob.size : null,
       call_id: null,
       voicemail_played_at: null,
       edited_at: null,
@@ -732,7 +739,7 @@ function MessageBubble({
       );
       break;
     case "file":
-      body = <FileMessage src={mediaSrc} name={message.content} mine={mine} />;
+      body = <FileMessage src={mediaSrc} name={message.content} size={message.file_size} mine={mine} />;
       break;
     case "text": {
       const math = parseMathResultMessage(message.content);

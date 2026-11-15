@@ -3,6 +3,8 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AudioPlayer, waveformFromSeed } from "@/components/audio-player";
+import { formatBadge } from "@/lib/file-types";
+import { formatBytes } from "@/lib/vault";
 
 // --- Image bubble -----------------------------------------------------------
 
@@ -145,36 +147,75 @@ export function VideoMessage({ src, name }: { src: string | null; name: string |
 
 // --- File bubble ------------------------------------------------------------
 
-export function FileMessage({ src, name, mine }: { src: string | null; name: string | null; mine: boolean }) {
+/**
+ * A document / file card: format badge (EPUB, PDF, ZIP…), original name,
+ * size, and a Download button. Unknown formats are stored as
+ * application/octet-stream, so opening the link downloads them.
+ */
+export function FileMessage({
+  src,
+  name,
+  size,
+  mine,
+}: {
+  src: string | null;
+  name: string | null;
+  size?: number | null;
+  mine: boolean;
+}) {
   const label = name || "File";
-  const ext = label.includes(".") ? label.split(".").pop()!.toUpperCase().slice(0, 4) : "FILE";
-  const body = (
-    <>
+  const badge = formatBadge(label);
+  const details = [badge === "FILE" ? "File" : `${badge} file`, size ? formatBytes(size) : null].filter(Boolean).join(" · ");
+  return (
+    <div
+      className={`flex w-72 max-w-[75vw] items-center gap-3 rounded-2xl px-3 py-2.5 ${
+        mine ? "bg-indigo-600 text-white" : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+      }`}
+    >
       <span
         aria-hidden
-        className={`flex size-10 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold ${
-          mine ? "bg-white/20 text-white" : "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
+        className={`relative flex h-12 w-10 shrink-0 flex-col items-center justify-end rounded-md pb-1.5 ${
+          mine ? "bg-white/20" : "bg-white dark:bg-zinc-900"
         }`}
       >
-        {ext}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">{label}</span>
-        <span className={`block text-xs ${mine ? "text-indigo-100" : "text-zinc-500"}`}>
-          {src ? "Open file" : "File unavailable"}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className={`absolute top-1.5 size-5 ${mine ? "text-white/80" : "text-zinc-400"}`}>
+          <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+          <path d="M14 3v5h5" />
+        </svg>
+        <span
+          className={`rounded px-1 text-[9px] leading-3.5 font-bold tracking-wide ${
+            mine ? "bg-white text-indigo-700" : "bg-indigo-600 text-white"
+          }`}
+        >
+          {badge}
         </span>
       </span>
-    </>
-  );
-  const className = `flex w-64 max-w-[70vw] items-center gap-3 rounded-2xl px-3 py-2.5 ${
-    mine ? "bg-indigo-600 text-white" : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
-  }`;
-  return src ? (
-    <a href={src} target="_blank" rel="noopener noreferrer" className={`${className} transition hover:brightness-95`}>
-      {body}
-    </a>
-  ) : (
-    <div className={className}>{body}</div>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium" title={label}>
+          {label}
+        </span>
+        <span className={`block truncate text-xs ${mine ? "text-indigo-100" : "text-zinc-500"}`}>
+          {src ? details : "File unavailable"}
+        </span>
+      </span>
+      {src && (
+        <a
+          href={src}
+          target="_blank"
+          rel="noopener noreferrer"
+          download={label}
+          title={`Download ${label}`}
+          aria-label={`Download ${label}`}
+          className={`flex size-9 shrink-0 items-center justify-center rounded-full transition ${
+            mine ? "bg-white/15 hover:bg-white/25" : "bg-white text-indigo-600 hover:bg-indigo-50 dark:bg-zinc-900 dark:text-indigo-400 dark:hover:bg-zinc-950"
+          }`}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="size-4.5">
+            <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />
+          </svg>
+        </a>
+      )}
+    </div>
   );
 }
 

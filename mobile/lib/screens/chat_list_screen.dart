@@ -111,6 +111,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       unawaited(LocalCache.saveChats(widget.me.id, _chatList));
     }
     _groupFilter.dispose();
+    _chatSearch.dispose();
     final channel = _channel;
     if (channel != null) unawaited(supabase.removeChannel(channel));
     super.dispose();
@@ -324,8 +325,74 @@ class _ChatListScreenState extends State<ChatListScreen> {
   bool _callsVisited = false;
   final _groupFilter = TextEditingController();
 
-  /// What's typed in the Chats search box (filters direct chats and groups).
-  String _chatQuery = '';
+  /// The Chats search box: filters direct chats and groups (works offline,
+  /// on the cached list) and looks up an exact @username.
+  final _chatSearch = TextEditingController();
+
+  Widget _searchField(TextEditingController controller, String hint) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      child: TextField(
+        controller: controller,
+        onChanged: (_) => setState(() {}),
+        autocorrect: false,
+        enableSuggestions: false,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: hint,
+          prefixIcon: const Icon(Icons.search),
+          isDense: true,
+          filled: true,
+          fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+          suffixIcon: controller.text.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: 'Clear',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => setState(controller.clear),
+                ),
+        ),
+      ),
+    );
+  }
+
+  /// Chats search results: matching groups first (so existing groups are
+  /// never buried), then direct chats, then "Find People" for an @username.
+  Widget _buildSearchResults(List<ChatSummary> matches, String query) {
+    final groups = matches.where((c) => c.isGroup).toList();
+    final directs = matches.where((c) => !c.isGroup).toList();
+    final username = usernameQuery(query);
+    Widget tile(ChatSummary c) => _ChatTile(
+          key: ValueKey(c.chatId),
+          chat: c,
+          meId: _me.id,
+          onTap: () => _openChat(c.chatId, summary: c),
+          onLongPress: () => _chatActions(c),
+        );
+    return ListView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: const EdgeInsets.only(bottom: 88),
+      children: [
+        if (groups.isNotEmpty) ...[_SectionHeader('Groups', groups.length), ...groups.map(tile)],
+        if (directs.isNotEmpty) ...[_SectionHeader('Direct Chats', directs.length), ...directs.map(tile)],
+        if (username != null) ...[
+          const _SectionHeader('Find People (@username)'),
+          _PeopleLookup(
+            username: username,
+            meId: _me.id,
+            onStartChat: _startChat,
+            onStarted: () => setState(_chatSearch.clear),
+          ),
+        ] else if (matches.isEmpty)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(32, 64, 32, 0),
+            child: Text('No matching chats or groups.', textAlign: TextAlign.center),
+          ),
+      ],
+    );
+  }
 
   static const _titles = ['Chats', 'Groups', 'Calls'];
 
@@ -346,7 +413,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     // Groups: group chats only.
     final all = [..._chats]..sort((a, b) => b.lastActivity.compareTo(a.lastActivity));
     final allGroups = all.where((c) => c.isGroup).toList();
-    final chatQuery = _chatQuery.trim();
+    final chatQuery = _chatSearch.text.trim();
     final chats = chatQuery.isEmpty ? all : all.where((c) => c.matches(chatQuery)).toList();
     final query = _groupFilter.text.trim();
     final groups = query.isEmpty ? allGroups : allGroups.where((c) => c.matches(query)).toList();
@@ -381,47 +448,23 @@ class _ChatListScreenState extends State<ChatListScreen> {
               children: [
                 Column(
                   children: [
-                    _UserSearch(
-                      meId: me.id,
-                      onStartChat: _startChat,
-                      onQueryChanged: (q) => setState(() => _chatQuery = q),
-                      // A matching conversation is answer enough; don't also say "no one goes by @x".
-                      hasLocalMatches: chatQuery.isNotEmpty && chats.isNotEmpty,
-                    ),
+                    // Always visible: no extra tap to reveal search.
+                    _searchField(_chatSearch, 'Search chats & groups…'),
                     Expanded(
-                      child: _buildList(
-                        context,
-                        chats,
-                        chatQuery.isNotEmpty
-                            ? 'No matching chats.'
-                            : 'No conversations yet.\nSearch for an @username to start one.',
-                      ),
+                      child: chatQuery.isEmpty
+                          ? _buildList(context, all, 'No conversations yet.\nSearch for an @username to start one.')
+                          : _buildSearchResults(chats, chatQuery),
                     ),
                   ],
                 ),
                 Column(
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                      child: TextField(
-                        controller: _groupFilter,
-                        onChanged: (_) => setState(() {}),
-                        textInputAction: TextInputAction.search,
-                        decoration: InputDecoration(
-                          hintText: 'Search groups',
-                          prefixIcon: const Icon(Icons.search),
-                          isDense: true,
-                          filled: true,
-                          fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                        ),
-                      ),
-                    ),
+                    _searchField(_groupFilter, 'Search your groups…'),
                     Expanded(
                       child: _buildList(
                         context,
                         groups,
-                        query.isNotEmpty ? 'No matching groups.' :'No groups yet.\nTap + to create one.',
+                        query.isNotEmpty ? 'No matching groups.' : 'No groups yet.\nTap + to create one.',
                       ),
                     ),
                   ],
@@ -667,15 +710,19 @@ class _ChatTile extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Exact @username search
+// "Find People": exact @username lookup in the Chats search results
 // ---------------------------------------------------------------------------
+
+/// The exact @username a search query holds, or null if it can't be one
+/// ("Book Club" has a space; "@Alice" is fine and becomes "alice").
+String? usernameQuery(String query) {
+  final candidate = query.trim().toLowerCase().replaceFirst(RegExp(r'^@'), '');
+  final username = normalizeUsername(candidate);
+  return username == candidate && isValidUsername(username) ? username : null;
+}
 
 sealed class _SearchState {
   const _SearchState();
-}
-
-class _Idle extends _SearchState {
-  const _Idle();
 }
 
 class _Searching extends _SearchState {
@@ -692,8 +739,7 @@ class _Self extends _SearchState {
 }
 
 class _NotFound extends _SearchState {
-  const _NotFound(this.username);
-  final String username;
+  const _NotFound();
 }
 
 class _Failed extends _SearchState {
@@ -701,57 +747,58 @@ class _Failed extends _SearchState {
   final String message;
 }
 
-class _UserSearch extends StatefulWidget {
-  const _UserSearch({
+/// Looks up [username] (debounced) so a new chat can be started with them.
+/// Existing chats and groups are listed above it, so it never hides them.
+class _PeopleLookup extends StatefulWidget {
+  const _PeopleLookup({
+    required this.username,
     required this.meId,
     required this.onStartChat,
-    required this.onQueryChanged,
-    this.hasLocalMatches = false,
+    required this.onStarted,
   });
 
+  final String username;
   final String meId;
 
   /// Returns an error message, or null on success.
   final Future<String?> Function(Profile other) onStartChat;
 
-  /// The raw text, for filtering the conversation list below.
-  final ValueChanged<String> onQueryChanged;
-
-  /// Hides "No one goes by @x" when conversations already match.
-  final bool hasLocalMatches;
+  /// After a chat was started (clears the search).
+  final VoidCallback onStarted;
 
   @override
-  State<_UserSearch> createState() => _UserSearchState();
+  State<_PeopleLookup> createState() => _PeopleLookupState();
 }
 
-/// One box for both: filters my conversations (direct chats by name or
-/// @username, groups by title) and, when the text is a valid username,
-/// looks that exact @username up to start a new chat.
-class _UserSearchState extends State<_UserSearch> {
-  final _controller = TextEditingController();
-  _SearchState _state = const _Idle();
+class _PeopleLookupState extends State<_PeopleLookup> {
+  _SearchState _state = const _Searching();
   bool _starting = false;
   Timer? _timer;
-  String _latest = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _schedule();
+  }
+
+  @override
+  void didUpdateWidget(_PeopleLookup old) {
+    super.didUpdateWidget(old);
+    if (old.username != widget.username) {
+      _state = const _Searching();
+      _schedule();
+    }
+  }
 
   @override
   void dispose() {
     _timer?.cancel();
-    _controller.dispose();
     super.dispose();
   }
 
-  void _onChanged(String text) {
-    widget.onQueryChanged(text);
+  void _schedule() {
     _timer?.cancel();
-    final candidate = text.trim().toLowerCase().replaceFirst(RegExp(r'^@'), '');
-    final username = normalizeUsername(candidate);
-    _latest = username;
-    if (username != candidate || !isValidUsername(username)) {
-      setState(() => _state = const _Idle());
-      return;
-    }
-    setState(() => _state = const _Searching());
+    final username = widget.username;
     _timer = Timer(const Duration(milliseconds: 350), () => _lookup(username));
   }
 
@@ -760,14 +807,14 @@ class _UserSearchState extends State<_UserSearch> {
     try {
       final profile = await ProfileRepository.findByUsername(username);
       next = profile == null
-          ? _NotFound(username)
+          ? const _NotFound()
           : profile.id == widget.meId
               ? const _Self()
               : _Found(profile);
-    } catch (_) {
-      next = const _Failed('Search failed. Try again.');
+    } catch (e) {
+      next = _Failed(isOfflineError(e) ? "You're offline. Connect to find new people." : 'Search failed. Try again.');
     }
-    if (!mounted || _latest != username) return;
+    if (!mounted || widget.username != username) return;
     setState(() => _state = next);
   }
 
@@ -777,78 +824,22 @@ class _UserSearchState extends State<_UserSearch> {
     if (!mounted) return;
     setState(() {
       _starting = false;
-      if (error == null) {
-        _controller.clear();
-        _latest = '';
-        widget.onQueryChanged('');
-        _state = const _Idle();
-      } else {
-        _state = _Failed(error);
-      }
+      if (error != null) _state = _Failed(error);
     });
+    if (error == null) widget.onStarted();
   }
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-      child: Column(
-        children: [
-          TextField(
-            controller: _controller,
-            autocorrect: false,
-            enableSuggestions: false,
-            textInputAction: TextInputAction.search,
-            onChanged: _onChanged,
-            onSubmitted: (_) {
-              final state = _state;
-              if (state is _Found && !_starting) _start(state.profile);
-            },
-            decoration: InputDecoration(
-              hintText: 'Search chats or find @username',
-              prefixIcon: const Icon(Icons.search),
-              isDense: true,
-              filled: true,
-              fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              suffixIcon: _controller.text.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: 'Clear',
-                      icon: const Icon(Icons.close),
-                      onPressed: () {
-                        _controller.clear();
-                        _onChanged('');
-                      },
-                    ),
-            ),
-          ),
-          AnimatedSize(
-            duration: const Duration(milliseconds: 150),
-            child: _buildResult(context),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildResult(BuildContext context) {
     final muted = TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant);
-    final Widget? body = switch (_state) {
-      _Idle() => null,
-      _Searching() when widget.hasLocalMatches => null,
-      _Searching() => const ListTile(
+    final username = widget.username;
+    final Widget body = switch (_state) {
+      _Searching() => ListTile(
           dense: true,
-          leading: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-          title: Text('Searching…'),
+          leading: const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+          title: Text('Looking up @$username…'),
         ),
-      _NotFound(:final username) => widget.hasLocalMatches
-          ? null
-          : ListTile(dense: true, title: Text('No one goes by @$username.', style: muted)),
+      _NotFound() => ListTile(dense: true, title: Text('No one goes by @$username.', style: muted)),
       _Self() => ListTile(dense: true, title: Text("That's you.", style: muted)),
       _Failed(:final message) => ListTile(
           dense: true,
@@ -866,10 +857,33 @@ class _UserSearchState extends State<_UserSearch> {
           ),
         ),
     };
-    if (body == null) return const SizedBox(width: double.infinity);
     return Card(
-      margin: const EdgeInsets.only(top: 8),
+      margin: const EdgeInsets.symmetric(horizontal: 12),
       child: Semantics(liveRegion: true, child: body),
+    );
+  }
+}
+
+/// Small section header in search results ("GROUPS · 2").
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader(this.title, [this.count]);
+
+  final String title;
+  final int? count;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Text(
+        count == null ? title.toUpperCase() : '${title.toUpperCase()} · $count',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
+            ),
+      ),
     );
   }
 }

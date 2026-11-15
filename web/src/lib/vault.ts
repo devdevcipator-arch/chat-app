@@ -1,9 +1,11 @@
 import type { Database } from "@/lib/database.types";
+import { DOCUMENT_MIME_TYPES, EXTENSION_PATTERN, OCTET_STREAM, fileExtension, isBlockedExtension } from "@/lib/file-types";
 import { publicBase } from "@/lib/media";
 
 // Shared (client + server) rules for the personal gallery ("vault").
-// Keep the extensions in sync with the `media_url_is_object_key` check in
-// supabase/migrations (forwarded items land in chats with these extensions).
+// Known media types are listed here; any other extension (except the
+// executables in lib/file-types.ts) is accepted as a "document". Keep in sync
+// with the key checks in supabase/migrations.
 
 export type VaultKind = "image" | "video" | "audio" | "document";
 
@@ -38,8 +40,6 @@ export const VAULT_MAX_BYTES: Record<VaultKind, number> = {
   audio: 25 * 1024 * 1024,
   document: 25 * 1024 * 1024,
 };
-
-export const VAULT_ACCEPT = Object.keys(VAULT_TYPES).join(",");
 
 export const isVaultMimeType = (type: string): type is VaultMimeType =>
   Object.prototype.hasOwnProperty.call(VAULT_TYPES, type);
@@ -80,25 +80,46 @@ const TYPE_ALIASES: Record<string, VaultMimeType> = {
   "application/vnd.ms-excel": "text/csv", // Windows reports .csv like this
 };
 
-/** The canonical MIME type we will store a file as, or null if unsupported. */
-export function resolveVaultType(file: { name: string; type: string }): VaultMimeType | null {
+/** How a file is stored: its Content-Type, key extension and gallery kind. */
+export type ResolvedFileType = { mime: string; ext: string; kind: VaultKind };
+
+const known = (type: VaultMimeType): ResolvedFileType => ({ mime: type, ...VAULT_TYPES[type] });
+
+/**
+ * How we will store a file, or null if it's an executable we refuse.
+ *
+ * Phones and browsers often report ebooks and other files as
+ * application/octet-stream or leave the type blank, so the extension decides
+ * whenever the declared type isn't one we know: "Book.epub" becomes an
+ * application/epub+zip document whatever was declared.
+ */
+export function resolveVaultType(file: { name: string; type: string }): ResolvedFileType | null {
   const type = file.type.toLowerCase();
-  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-  if (isVaultMimeType(type)) return type;
+  const ext = fileExtension(file.name);
+  if (ext && isBlockedExtension(ext)) return null;
+  if (isVaultMimeType(type)) return known(type);
   const alias = TYPE_ALIASES[type];
-  if (alias && (alias !== "text/csv" || ext === "csv")) return alias;
-  return EXTENSION_TYPES[ext] ?? null;
+  if (alias && (alias !== "text/csv" || ext === "csv")) return known(alias);
+  if (ext in EXTENSION_TYPES) return known(EXTENSION_TYPES[ext]);
+  // Anything else is a document under its own extension.
+  return { mime: DOCUMENT_MIME_TYPES[ext] ?? OCTET_STREAM, ext: ext || "bin", kind: "document" };
+}
+
+/** Whether a stored key's extension is acceptable (mirrors the database checks). */
+export function allowedKeyExtension(key: string) {
+  const ext = key.slice(key.lastIndexOf(".") + 1);
+  return EXTENSION_PATTERN.test(ext) && !isBlockedExtension(ext);
 }
 
 /** Vault keys look like vault/<userId>/<fileId>.<ext>. */
-export const VAULT_KEY_PATTERN = /^vault\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.[a-z0-9]{2,5}$/;
+export const VAULT_KEY_PATTERN = /^vault\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.[a-z0-9]{1,10}$/;
 
-export const vaultKey = (userId: string, fileId: string, type: VaultMimeType) =>
-  `vault/${userId}/${fileId}.${VAULT_TYPES[type].ext}`;
+export const vaultKey = (userId: string, fileId: string, type: ResolvedFileType) =>
+  `vault/${userId}/${fileId}.${type.ext}`;
 
 /** Public URL for a vault object key; null if it isn't one. */
 export function vaultPublicUrl(key: string): string | null {
-  if (!VAULT_KEY_PATTERN.test(key)) return null;
+  if (!VAULT_KEY_PATTERN.test(key) || !allowedKeyExtension(key)) return null;
   const base = publicBase();
   return base ? `${base}/${key}` : null;
 }
@@ -155,7 +176,7 @@ export function formatBytes(bytes: number) {
 export type VaultUploadUrlRequest = { fileName: string; fileType: string; fileSize: number };
 export type VaultUploadUrlResponse = {
   fileId: string;
-  fileType: VaultMimeType;
+  fileType: string;
   uploadUrl: string;
   headers: Record<string, string>;
   expiresIn: number;

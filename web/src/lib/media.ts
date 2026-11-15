@@ -1,3 +1,5 @@
+import { isBlockedExtension } from "@/lib/file-types";
+
 // Shared (client + server) media rules. Keep in sync with the
 // `media_url_is_object_key` check in supabase/migrations.
 
@@ -47,12 +49,11 @@ export function isMediaMimeType(type: string): type is MediaMimeType {
 }
 
 /**
- * Object keys look like chats/<chatId>/<userId>/<uuid>.<ext>. The extra
- * extensions (gif, video, documents) only arrive by forwarding from the
- * gallery (see lib/vault.ts); direct chat uploads stay images + audio.
+ * Object keys look like chats/<chatId>/<userId>/<uuid>.<ext>, where <ext> is
+ * any extension except the executables in lib/file-types.ts (the same rule as
+ * the media_url_is_object_key check).
  */
-export const OBJECT_KEY_PATTERN =
-  /^chats\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(webp|jpg|png|gif|webm|ogg|mp3|m4a|aac|wav|mp4|mov|pdf|txt|csv|zip|docx|xlsx|pptx)$/;
+export const OBJECT_KEY_PATTERN = /^chats\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.([a-z0-9]{1,10})$/;
 
 export function publicBase() {
   const raw = (process.env.NEXT_PUBLIC_R2_PUBLIC_DOMAIN ?? "").trim().replace(/\/+$/, "");
@@ -62,7 +63,8 @@ export function publicBase() {
 
 /** Public URL for a stored object key; null if it isn't one of ours. */
 export function mediaPublicUrl(key: string | null): string | null {
-  if (!key || !OBJECT_KEY_PATTERN.test(key)) return null;
+  const match = key ? OBJECT_KEY_PATTERN.exec(key) : null;
+  if (!key || !match || isBlockedExtension(match[1])) return null;
   const base = publicBase();
   return base ? `${base}/${key}` : null;
 }
@@ -76,6 +78,10 @@ export type UploadUrlRequest = {
 
 export type UploadUrlResponse = {
   uploadUrl: string;
+  /** The Content-Type the file is stored as (resolved from its name if needed). */
+  fileType: string;
+  /** The message_type to post it as. */
+  messageType: "image" | "audio" | "video" | "file";
   publicUrl: string;
   key: string;
   /** Headers the PUT must send exactly (they are part of the signature). */

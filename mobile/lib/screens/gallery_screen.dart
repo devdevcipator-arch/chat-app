@@ -89,8 +89,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
           if (photo != null) unawaited(_upload(File(photo.path), photo.name));
         case 'files':
           final files = await FilePicker.pickFiles(
-            type: FileType.custom,
-            allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'mov', 'webm', ...pickableDocumentExtensions],
+            type: FileType.any, // any format except executables (checked on upload)
           );
           for (final f in files) {
             final path = f.path;

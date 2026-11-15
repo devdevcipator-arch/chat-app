@@ -297,11 +297,15 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _sendFile(File file, String fileName, {int? durationSeconds}) {
-    final type = mediaTypeFor(fileName);
-    if (type == null || !chatAcceptsImage(type)) {
-      _showSnack("That file type isn't supported.");
+    final type = chatUploadTypeFor(fileName);
+    if (type == null) {
+      _showSnack("Executable files (.exe, .bat, …) can't be sent.");
       return;
     }
+    int? size;
+    try {
+      size = file.lengthSync(); // one stat, so the card shows its size while uploading
+    } catch (_) {}
     final id = uuidV4();
     _pending[id] = _PendingUpload(file, fileName, type, durationSeconds);
     final optimistic = ChatMessage(
@@ -313,6 +317,7 @@ class _ChatScreenState extends State<ChatScreen> {
       mediaUrl: null,
       createdAt: DateTime.now().toUtc(),
       durationSeconds: durationSeconds,
+      fileSize: type.kind == UploadKind.file ? size : null,
       status: MessageStatus.sending,
       localPath: file.path,
       progress: 0,
@@ -378,7 +383,7 @@ class _ChatScreenState extends State<ChatScreen> {
             _sheetItem(context, 'photo', Icons.image_outlined, 'Photo from device'),
             _sheetItem(context, 'video', Icons.videocam_outlined, 'Video from device'),
             _sheetItem(context, 'gallery', Icons.photo_library_outlined, 'From my Gallery'),
-            _sheetItem(context, 'file', Icons.attach_file, 'Document or audio file'),
+            _sheetItem(context, 'file', Icons.attach_file, 'Any file (EPUB, PDF, ZIP…)'),
           ],
         ),
       ),
@@ -396,7 +401,10 @@ class _ChatScreenState extends State<ChatScreen> {
         case 'gallery':
           await _pickFromGallery();
         case 'file':
-          final picked = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: pickableDocumentExtensions);
+          // Any format: Android's picker hides .epub and many others behind a
+          // custom extension list, so let the user pick anything; executables
+          // are refused in _sendFile (and by the server).
+          final picked = await FilePicker.pickFile(type: FileType.any);
           final path = picked?.path;
           if (picked != null && path != null) _sendFile(File(path), picked.name);
       }
@@ -971,6 +979,8 @@ class _MessageBubble extends StatelessWidget {
         return _FileTile(
           icon: Icons.play_circle_fill,
           name: message.content ?? 'Video',
+          mine: mine,
+          actionIcon: Icons.play_arrow_rounded,
           color: textColor,
           onTap: url == null && local == null
               ? null
@@ -1016,6 +1026,8 @@ class _MessageBubble extends StatelessWidget {
         return _FileTile(
           icon: iconForFile(message.content ?? ''),
           name: message.content ?? 'File',
+          size: message.fileSize,
+          mine: mine,
           color: textColor,
           onTap: url == null ? null : () => openExternally(url),
         );
@@ -1034,33 +1046,111 @@ class _MessageBubble extends StatelessWidget {
       );
 }
 
+/// File attachment card: icon with a format badge (EPUB, PDF, ZIP…), the
+/// original name, size, and a download button. Tapping anywhere opens it in
+/// the system viewer / downloader (unknown formats download).
 class _FileTile extends StatelessWidget {
-  const _FileTile({required this.icon, required this.name, required this.color, this.onTap});
+  const _FileTile({
+    required this.icon,
+    required this.name,
+    required this.color,
+    required this.mine,
+    this.size,
+    this.actionIcon = Icons.download_rounded,
+    this.onTap,
+  });
 
   final IconData icon;
   final String name;
+  final int? size;
+
+  /// The round button on the right (download; play for videos).
+  final IconData actionIcon;
+  final bool mine;
   final Color color;
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) => InkWell(
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final badge = formatBadge(name);
+    final details = [badge == 'FILE' ? 'File' : '$badge file', if (size != null) formatBytes(size!)].join(' · ');
+    final tileColor = mine ? Colors.white.withValues(alpha: 0.18) : scheme.surface;
+    return Semantics(
+      button: onTap != null,
+      label: '$name, $details${onTap == null ? ', unavailable' : ', tap to open'}',
+      excludeSemantics: true,
+      child: InkWell(
         onTap: onTap,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: color, size: 32),
-            const SizedBox(width: 10),
-            Flexible(
-              child: Text(
-                name,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: color, fontWeight: FontWeight.w500),
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(
+          width: 240,
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 50,
+                decoration: BoxDecoration(color: tileColor, borderRadius: BorderRadius.circular(8)),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    Icon(icon, color: color.withValues(alpha: 0.85), size: 20),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: mine ? Colors.white : scheme.primary,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        badge,
+                        style: TextStyle(
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.3,
+                          color: mine ? scheme.primary : scheme.onPrimary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: color, fontWeight: FontWeight.w600, height: 1.2),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      onTap == null ? 'File unavailable' : details,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: color.withValues(alpha: 0.75), fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              if (onTap != null) ...[
+                const SizedBox(width: 6),
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(color: tileColor, shape: BoxShape.circle),
+                  child: Icon(actionIcon, size: 18, color: color),
+                ),
+              ],
+            ],
+          ),
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _Composer extends StatefulWidget {

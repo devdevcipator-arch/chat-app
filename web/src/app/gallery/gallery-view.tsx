@@ -6,7 +6,7 @@ import { useCallback, useRef, useState, type ChangeEvent, type DragEvent } from 
 import { ConfirmDialog } from "@/components/dialog";
 import { chatName, type ChatSummary } from "@/lib/chat";
 import { UploadError } from "@/lib/media-client";
-import { VAULT_ACCEPT, VAULT_MAX_BYTES, formatBytes, type GalleryItem } from "@/lib/vault";
+import { VAULT_MAX_BYTES, formatBytes, type GalleryItem } from "@/lib/vault";
 import { checkVaultFile, deleteGalleryItem, galleryDownloadUrl, uploadToGallery } from "@/lib/vault-client";
 import { ForwardDialog } from "./forward-dialog";
 import {
@@ -198,7 +198,8 @@ export function GalleryView({
             <PlusIcon />
             Upload Media
           </button>
-          <input ref={fileInput} type="file" multiple accept={VAULT_ACCEPT} onChange={onPick} className="hidden" />
+          {/* Any format except executables (checked on pick and on the server). */}
+          <input ref={fileInput} type="file" multiple onChange={onPick} className="hidden" />
         </div>
       </header>
 

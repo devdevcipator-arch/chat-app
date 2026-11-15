@@ -2,7 +2,6 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
-import { DEVICE_FILES_ACCEPT } from "@/lib/chat-upload";
 
 const MAX_FILES = 10;
 
@@ -68,7 +67,7 @@ export function AttachMenu({ onFiles, onOpenGallery }: { onFiles: (files: File[]
 
   return (
     <div ref={root} className="relative shrink-0">
-      <input ref={filesInput} type="file" accept={DEVICE_FILES_ACCEPT} multiple onChange={handleFiles} className="hidden" tabIndex={-1} aria-hidden />
+      <input ref={filesInput} type="file" multiple onChange={handleFiles} className="hidden" tabIndex={-1} aria-hidden />
 
       <button
         ref={trigger}
@@ -128,7 +127,7 @@ export function AttachMenu({ onFiles, onOpenGallery }: { onFiles: (files: File[]
             <MenuItem
               onSelect={() => pick(filesInput.current)}
               label="Device Files"
-              hint="Photos, videos, PDF, Word, ZIP…"
+              hint="Any file: EPUB, PDF, Word, ZIP, photos…"
               tint="bg-sky-100 text-sky-600 dark:bg-sky-950/70 dark:text-sky-300"
               icon={
                 <>

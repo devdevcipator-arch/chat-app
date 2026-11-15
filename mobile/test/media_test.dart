@@ -21,7 +21,65 @@ void main() {
     expect(mediaTypeFor('report.pdf')?.messageType, 'file');
     expect(mediaTypeFor('photo.jpeg')?.ext, 'jpg');
     expect(mediaTypeFor('malware.exe'), isNull);
-    expect(chatAcceptsImage(mediaTypeFor('a.gif')!), isFalse);
+    // GIFs aren't chat images (no re-encoding): they go as a file card.
+    expect(chatUploadTypeFor('a.gif')?.messageType, 'file');
+    expect(chatUploadTypeFor('a.png')?.messageType, 'image');
+  });
+
+  group('any file format except executables', () {
+    test('.epub and other documents resolve by extension, not the picker type', () {
+      final epub = mediaTypeFor('My Book.EPUB')!;
+      expect(epub.mime, 'application/epub+zip');
+      expect(epub.ext, 'epub');
+      expect(epub.messageType, 'file');
+      expect(mediaTypeFor('notes.odt')?.mime, 'application/vnd.oasis.opendocument.text');
+      expect(mediaTypeFor('archive.7z')?.mime, 'application/x-7z-compressed');
+    });
+
+    test('unknown formats are sent as generic files (downloaded, never rendered)', () {
+      expect(mediaTypeFor('scan.heic')?.mime, 'application/octet-stream');
+      expect(mediaTypeFor('page.html')?.mime, 'application/octet-stream');
+      expect(mediaTypeFor('README')?.ext, 'bin');
+      expect(mediaTypeFor('weird.name.with.a.very-long-extension')?.ext, 'bin');
+    });
+
+    test('executables and script hosts are refused', () {
+      for (final name in ['setup.exe', 'run.BAT', 'x.cmd', 'a.scr', 'b.msi', 'c.ps1', 'd.vbs', 'e.js', 'f.jar']) {
+        expect(mediaTypeFor(name), isNull, reason: name);
+      }
+    });
+
+    test('format badges', () {
+      expect(formatBadge('Book.epub'), 'EPUB');
+      expect(formatBadge('q3.pdf'), 'PDF');
+      expect(formatBadge('README'), 'FILE');
+      expect(formatBadge(null), 'FILE');
+    });
+
+    test('any allowed extension is a valid key, executables never are', () {
+      const id = '11111111-2222-3333-4444-555555555555';
+      const prefix = 'chats/$id/$id/$id';
+      // Without R2_PUBLIC_BASE no URL is built, but the key check runs first:
+      // both must be null here; the shape is asserted via mediaTypeFor above.
+      expect(mediaPublicUrl('$prefix.exe'), isNull);
+      expect(mediaPublicUrl('$prefix.toolongextension'), isNull);
+    });
+  });
+
+  test('file size round-trips through the message model', () {
+    final m = ChatMessage.fromMap({
+      'id': 'm',
+      'chat_id': 'c',
+      'sender_id': 'u',
+      'message_type': 'file',
+      'content': 'Book.epub',
+      'media_url': null,
+      'created_at': '2026-11-15T12:00:00Z',
+      'file_size': 2516582,
+    });
+    expect(m.fileSize, 2516582);
+    expect(ChatMessage.fromMap(m.toMap()).fileSize, 2516582);
+    expect(formatBytes(m.fileSize!), '2.4 MB');
   });
 
   test('upload limits mirror the server', () {

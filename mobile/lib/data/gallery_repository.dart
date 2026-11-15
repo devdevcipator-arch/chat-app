@@ -21,7 +21,7 @@ abstract final class GalleryRepository {
     void Function(double fraction)? onProgress,
   }) async {
     final type = mediaTypeFor(fileName);
-    if (type == null) throw const ApiException("That file type isn't supported.");
+    if (type == null) throw const ApiException("Executable files (.exe, .bat, …) can't be uploaded.");
     final size = await file.length();
     if (size == 0) throw const ApiException('That file is empty.');
     final limit = galleryUploadLimit(type);

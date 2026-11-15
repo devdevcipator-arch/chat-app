@@ -2,7 +2,6 @@ import type { MessageRow } from "@/lib/chat";
 import { UploadError, uploadToR2 } from "@/lib/media-client";
 import {
   VAULT_MAX_BYTES,
-  VAULT_TYPES,
   formatBytes,
   resolveVaultType,
   type GalleryItem,
@@ -32,8 +31,8 @@ async function api<T>(url: string, init: RequestInit, fallback: string): Promise
 /** Throws a user-facing UploadError if the file can't go in the gallery. */
 export function checkVaultFile(file: File) {
   const type = resolveVaultType(file);
-  if (!type) throw new UploadError(`"${file.name}" isn't a supported file type.`);
-  const max = VAULT_MAX_BYTES[VAULT_TYPES[type].kind];
+  if (!type) throw new UploadError(`"${file.name}" is an executable and can't be uploaded.`);
+  const max = VAULT_MAX_BYTES[type.kind];
   if (file.size > max) throw new UploadError(`"${file.name}" is larger than ${formatBytes(max)}.`);
   if (file.size === 0) throw new UploadError(`"${file.name}" is empty.`);
   return type;
@@ -46,7 +45,7 @@ export async function uploadToGallery(file: File, onProgress: (fraction: number)
   const type = checkVaultFile(file);
   const target = await api<VaultUploadUrlResponse>(
     "/api/gallery/upload-url",
-    { method: "POST", body: JSON.stringify({ fileName: file.name, fileType: type, fileSize: file.size }) },
+    { method: "POST", body: JSON.stringify({ fileName: file.name, fileType: type.mime, fileSize: file.size }) },
     "Couldn't prepare the upload.",
   );
   await uploadToR2(target, file, onProgress, UPLOAD_TIMEOUT_MS);

@@ -54,10 +54,12 @@ export async function POST(request: NextRequest) {
   }
   const parsed = parseBody(json);
   if (typeof parsed === "string") return fail(400, parsed);
-  const { chatId, fileType, fileSize } = parsed;
+  const { chatId, fileName, fileType, fileSize } = parsed;
 
-  // Images (already re-encoded), audio, videos and documents.
-  const rule = chatUploadRule(fileType);
+  // Images (already re-encoded), audio, videos, and documents of any format
+  // except executables. Android often sends .epub and other files as
+  // application/octet-stream (or no type): those resolve from the file name.
+  const rule = chatUploadRule(fileType, fileName);
   if (!rule) return fail(415, "That file type isn't supported.");
   if (fileSize > rule.maxBytes) return fail(413, `Files like this must be ${formatLimit(rule.maxBytes)} or smaller.`);
 
@@ -86,7 +88,7 @@ export async function POST(request: NextRequest) {
       new PutObjectCommand({
         Bucket: r2.bucket,
         Key: key,
-        ContentType: fileType,
+        ContentType: rule.mime,
         ContentLength: fileSize,
       }),
       {
@@ -102,7 +104,9 @@ export async function POST(request: NextRequest) {
         uploadUrl,
         publicUrl,
         key,
-        headers: { "Content-Type": fileType },
+        fileType: rule.mime,
+        messageType: rule.kind,
+        headers: { "Content-Type": rule.mime },
         expiresIn: URL_TTL_SECONDS,
       },
       { headers: { "Cache-Control": "no-store" } },

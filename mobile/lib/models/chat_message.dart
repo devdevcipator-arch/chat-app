@@ -13,6 +13,7 @@ class ChatMessage {
     required this.mediaUrl,
     required this.createdAt,
     this.durationSeconds,
+    this.fileSize,
     this.editedAt,
     this.callId,
     this.voicemailPlayedAt,
@@ -34,6 +35,9 @@ class ChatMessage {
   final String? mediaUrl;
   final DateTime createdAt;
   final int? durationSeconds;
+
+  /// Bytes, for file cards ("2.4 MB"); null for older messages.
+  final int? fileSize;
   final DateTime? editedAt;
   final String? callId;
   final DateTime? voicemailPlayedAt;
@@ -71,6 +75,7 @@ class ChatMessage {
         mediaUrl: map['media_url'] as String?,
         createdAt: DateTime.parse(map['created_at'] as String),
         durationSeconds: (map['duration_seconds'] as num?)?.toInt(),
+        fileSize: (map['file_size'] as num?)?.toInt(),
         editedAt: _date(map['edited_at']),
         callId: map['call_id'] as String?,
         voicemailPlayedAt: _date(map['voicemail_played_at']),
@@ -87,6 +92,7 @@ class ChatMessage {
         'media_url': mediaUrl,
         'created_at': createdAt.toIso8601String(),
         'duration_seconds': durationSeconds,
+        'file_size': fileSize,
         'edited_at': editedAt?.toIso8601String(),
         'call_id': callId,
         'voicemail_played_at': voicemailPlayedAt?.toIso8601String(),
@@ -108,6 +114,7 @@ class ChatMessage {
         mediaUrl: mediaUrl,
         createdAt: createdAt,
         durationSeconds: durationSeconds,
+        fileSize: fileSize,
         editedAt: editedAt,
         callId: callId,
         voicemailPlayedAt: voicemailPlayedAt ?? this.voicemailPlayedAt,
@@ -129,6 +136,7 @@ class ChatMessage {
           mediaUrl: mediaUrl,
           createdAt: createdAt,
           durationSeconds: durationSeconds,
+          fileSize: fileSize,
           editedAt: editedAt,
           callId: callId,
           voicemailPlayedAt: voicemailPlayedAt,

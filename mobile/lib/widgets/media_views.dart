@@ -145,10 +145,14 @@ IconData iconForFile(String name) {
   final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
   return switch (ext) {
     'pdf' => Icons.picture_as_pdf_outlined,
-    'zip' => Icons.folder_zip_outlined,
-    'xlsx' || 'csv' => Icons.table_chart_outlined,
-    'pptx' => Icons.slideshow_outlined,
-    'mp3' || 'm4a' || 'aac' || 'ogg' || 'wav' => Icons.audio_file_outlined,
+    'epub' || 'mobi' || 'azw3' || 'fb2' || 'djvu' || 'cbz' || 'cbr' => Icons.menu_book_outlined,
+    'zip' || 'rar' || '7z' || 'tar' || 'gz' => Icons.folder_zip_outlined,
+    'xls' || 'xlsx' || 'ods' || 'csv' => Icons.table_chart_outlined,
+    'ppt' || 'pptx' || 'odp' || 'key' => Icons.slideshow_outlined,
+    'mp3' || 'm4a' || 'aac' || 'ogg' || 'wav' || 'flac' => Icons.audio_file_outlined,
+    'jpg' || 'jpeg' || 'png' || 'gif' || 'webp' || 'heic' => Icons.image_outlined,
+    'mp4' || 'mov' || 'webm' || 'mkv' => Icons.movie_outlined,
+    'apk' => Icons.android,
     _ => Icons.description_outlined,
   };
 }

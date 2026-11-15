@@ -1,154 +1,117 @@
 "use client";
 
-import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Avatar } from "@/components/avatar";
 import { Spinner } from "@/components/auth-card";
 import { profileName, type PublicProfile } from "@/lib/chat";
 import { createClient } from "@/lib/supabase/client";
 import { isValidUsername, normalizeUsername } from "@/lib/username";
 
-type Result =
-  | { kind: "idle" }
-  | { kind: "searching" }
+type Lookup =
   | { kind: "found"; profile: PublicProfile }
   | { kind: "self" }
-  | { kind: "none"; username: string }
+  | { kind: "none" }
   | { kind: "error"; message: string };
 
 const DEBOUNCE_MS = 350;
 
+/** The exact @username a search box holds, or null if it can't be one ("Book Club"). */
+export function usernameQuery(query: string) {
+  const candidate = query.trim().toLowerCase().replace(/^@/, "");
+  const username = normalizeUsername(candidate);
+  return username === candidate && isValidUsername(username) ? username : null;
+}
+
 /**
- * One box for both: filters my conversations (via onQueryChange: direct
- * chats by name or @username, groups by title) and, when the text is a valid
- * username, looks that exact @username up to start a new chat.
+ * "Find People": looks up the exact @username typed in the Chats search box
+ * so a new chat can be started. Renders nothing unless the query could be a
+ * username. Existing chats and groups are listed above it by the sidebar.
  */
-export function UserSearch({
+export function PeopleLookup({
+  query,
   meId,
   onStartChat,
-  onQueryChange,
-  hasLocalMatches = false,
+  onStarted,
 }: {
+  query: string;
   meId: string;
   onStartChat: (otherUserId: string) => Promise<string | null>;
-  onQueryChange: (query: string) => void;
-  /** Conversations already match: skip "Searching…" / "No one goes by @x". */
-  hasLocalMatches?: boolean;
+  /** Called after a chat was started (to clear the search). */
+  onStarted: () => void;
 }) {
   const [supabase] = useState(createClient);
-  const [query, setQuery] = useState("");
-  const [result, setResult] = useState<Result>({ kind: "idle" });
+  const username = usernameQuery(query);
+  // Results are keyed by the username they answer, so a stale one never shows.
+  const [result, setResult] = useState<{ username: string; lookup: Lookup } | null>(null);
   const [starting, setStarting] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latest = useRef("");
+  const [startError, setStartError] = useState<string | null>(null);
 
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
+  useEffect(() => {
+    if (!username) return;
+    let stale = false;
+    const timer = setTimeout(async () => {
+      const { data, error } = await supabase.rpc("find_profile_by_username", { p_username: username });
+      if (stale) return;
+      const row = data?.[0];
+      const lookup: Lookup = error
+        ? { kind: "error", message: "Search failed. Try again." }
+        : !row
+          ? { kind: "none" }
+          : row.id === meId
+            ? { kind: "self" }
+            : {
+                kind: "found",
+                profile: { id: row.id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url },
+              };
+      setResult({ username, lookup });
+    }, DEBOUNCE_MS);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [supabase, meId, username]);
 
-  async function lookup(username: string) {
-    const { data, error } = await supabase.rpc("find_profile_by_username", {
-      p_username: username,
-    });
-    if (latest.current !== username) return;
-    if (error) return setResult({ kind: "error", message: "Search failed. Try again." });
-    const row = data[0];
-    if (!row) return setResult({ kind: "none", username });
-    if (row.id === meId) return setResult({ kind: "self" });
-    setResult({
-      kind: "found",
-      profile: {
-        id: row.id,
-        username: row.username,
-        displayName: row.display_name,
-        avatarUrl: row.avatar_url,
-      },
-    });
-  }
-
-  function handleChange(raw: string) {
-    setQuery(raw);
-    onQueryChange(raw);
-    const candidate = raw.trim().toLowerCase().replace(/^@/, "");
-    const username = normalizeUsername(candidate);
-    latest.current = username;
-    if (timer.current) clearTimeout(timer.current);
-    if (username !== candidate || !isValidUsername(username)) return setResult({ kind: "idle" });
-    setResult({ kind: "searching" });
-    timer.current = setTimeout(() => void lookup(username), DEBOUNCE_MS);
-  }
+  if (!username) return null;
+  const lookup = result?.username === username ? result.lookup : null;
 
   async function start(profile: PublicProfile) {
     setStarting(true);
+    setStartError(null);
     const error = await onStartChat(profile.id);
     setStarting(false);
-    if (error) return setResult({ kind: "error", message: error });
-    setQuery("");
-    onQueryChange("");
-    latest.current = "";
-    setResult({ kind: "idle" });
+    if (error) setStartError(error);
+    else onStarted();
   }
 
   return (
-    <div className="px-3">
-      <div className="relative">
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => handleChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && result.kind === "found" && !starting) void start(result.profile);
-          }}
-          placeholder="Search chats or find @username"
-          aria-label="Search chats, or find a user by exact username"
-          autoComplete="off"
-          autoCapitalize="none"
-          spellCheck={false}
-          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-900"
-        />
-      </div>
-
-      <AnimatePresence initial={false}>
-        {result.kind !== "idle" && !(hasLocalMatches && (result.kind === "searching" || result.kind === "none")) && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.15 }}
-            className="overflow-hidden"
-            aria-live="polite"
+    <div className="mx-1 rounded-lg border border-zinc-200 bg-white p-2.5 text-sm dark:border-zinc-800 dark:bg-zinc-900" aria-live="polite">
+      {!lookup && (
+        <p className="flex items-center gap-2 text-zinc-500">
+          <Spinner /> Looking up @{username}…
+        </p>
+      )}
+      {lookup?.kind === "none" && <p className="text-zinc-500">No one goes by @{username}.</p>}
+      {lookup?.kind === "self" && <p className="text-zinc-500">That&apos;s you.</p>}
+      {lookup?.kind === "error" && <p className="text-red-600 dark:text-red-400">{lookup.message}</p>}
+      {lookup?.kind === "found" && (
+        <div className="flex items-center gap-3">
+          <Avatar name={profileName(lookup.profile)} src={lookup.profile.avatarUrl} size="sm" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-medium">{profileName(lookup.profile)}</p>
+            <p className="truncate text-xs text-zinc-500">@{lookup.profile.username}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void start(lookup.profile)}
+            disabled={starting}
+            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-500 disabled:opacity-60"
           >
-            <div className="mt-2 rounded-lg border border-zinc-200 bg-white p-2.5 text-sm dark:border-zinc-800 dark:bg-zinc-900">
-              {result.kind === "searching" && (
-                <p className="flex items-center gap-2 text-zinc-500">
-                  <Spinner /> Searching…
-                </p>
-              )}
-              {result.kind === "none" && <p className="text-zinc-500">No one goes by @{result.username}.</p>}
-              {result.kind === "self" && <p className="text-zinc-500">That&apos;s you.</p>}
-              {result.kind === "error" && <p className="text-red-600 dark:text-red-400">{result.message}</p>}
-              {result.kind === "found" && (
-                <div className="flex items-center gap-3">
-                  <Avatar name={profileName(result.profile)} src={result.profile.avatarUrl} size="sm" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{profileName(result.profile)}</p>
-                    <p className="truncate text-xs text-zinc-500">@{result.profile.username}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void start(result.profile)}
-                    disabled={starting}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-500 disabled:opacity-60"
-                  >
-                    {starting && <Spinner />}
-                    Start chat
-                  </button>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            {starting && <Spinner />}
+            Start chat
+          </button>
+        </div>
+      )}
+      {startError && <p className="mt-2 text-red-600 dark:text-red-400">{startError}</p>}
     </div>
   );
 }

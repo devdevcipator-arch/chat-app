@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Avatar } from "@/components/avatar";
 import { PoweredBy } from "@/components/powered-by";
 import { ThemeSync } from "@/components/theme";
@@ -28,7 +28,7 @@ import { NotificationPrompt } from "./notification-prompt";
 import { BottomNav, GalleryIcon, NavRail, type SidebarTab, type TabBadges } from "./sidebar-nav";
 import { usePageActive, useUnreadTitle } from "./use-page-attention";
 import { useMissedCalls } from "./use-missed-calls";
-import { UserSearch } from "./user-search";
+import { PeopleLookup, usernameQuery } from "./user-search";
 
 const CHAT_PATH = /^\/chat\/([0-9a-f-]{36})/i;
 
@@ -258,6 +258,8 @@ export function ChatSidebar({
   // Chats search: direct chats by name / @username, groups by title.
   const chatSearch = chatQuery.trim();
   const shownChats = chatSearch ? allChats.filter((c) => chatMatches(c, chatSearch)) : allChats;
+  const searchGroups = shownChats.filter((c) => c.type === "group");
+  const searchDirects = shownChats.filter((c) => c.type !== "group");
   const groupQuery = groupFilter.trim();
   const groupChats = groupQuery ? allGroups.filter((c) => chatMatches(c, groupQuery)) : allGroups;
   const { count: missedCalls, markSeen: markCallsSeen } = useMissedCalls(me.id, tab === "calls");
@@ -309,32 +311,51 @@ export function ChatSidebar({
           </div>
         </div>
 
+        {/* Always visible at the top: no extra tap to reveal search. */}
         {tab === "chats" && (
-          <UserSearch
-            meId={me.id}
-            onStartChat={startChat}
-            onQueryChange={setChatQuery}
-            hasLocalMatches={chatSearch !== "" && shownChats.length > 0}
+          <SearchBox
+            value={chatQuery}
+            onChange={setChatQuery}
+            placeholder="Search chats & groups…"
+            label="Search chats and groups, or find a user by @username"
           />
         )}
         {tab === "groups" && (
-          <div className="px-3">
-            <input
-              type="search"
-              value={groupFilter}
-              onChange={(e) => setGroupFilter(e.target.value)}
-              placeholder="Search groups"
-              aria-label="Search groups"
-              autoComplete="off"
-              className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-900"
-            />
-          </div>
+          <SearchBox value={groupFilter} onChange={setGroupFilter} placeholder="Search your groups…" label="Search your groups" />
         )}
         {tab !== "calls" && <NotificationPrompt />}
 
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {tab === "calls" ? (
             <CallsPanel meId={me.id} chats={chats} />
+          ) : tab === "chats" && chatSearch ? (
+            // Searching: matching groups first, so existing groups are never
+            // buried under direct chats or the @username lookup.
+            <div className="space-y-3 pb-2">
+              {searchGroups.length > 0 && (
+                <SearchSection title="Groups" count={searchGroups.length}>
+                  <ChatList chats={searchGroups} meId={me.id} activeChatId={activeChatId} empty="" />
+                </SearchSection>
+              )}
+              {searchDirects.length > 0 && (
+                <SearchSection title="Direct Chats" count={searchDirects.length}>
+                  <ChatList chats={searchDirects} meId={me.id} activeChatId={activeChatId} empty="" />
+                </SearchSection>
+              )}
+              {usernameQuery(chatSearch) ? (
+                <SearchSection title="Find People (@username)">
+                  <div className="px-2">
+                    <PeopleLookup query={chatSearch} meId={me.id} onStartChat={startChat} onStarted={() => setChatQuery("")} />
+                  </div>
+                </SearchSection>
+              ) : (
+                shownChats.length === 0 && (
+                  <p className="mx-3 rounded-lg border border-dashed border-zinc-300 px-3 py-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
+                    No matching chats or groups.
+                  </p>
+                )
+              )}
+            </div>
           ) : (
             <ChatList
               chats={tab === "groups" ? groupChats : shownChats}
@@ -372,6 +393,52 @@ export function ChatSidebar({
 
 function lastActivity(chat: ChatSummary) {
   return Date.parse(chat.lastMessage?.createdAt ?? chat.createdAt);
+}
+
+function SearchBox({
+  value,
+  onChange,
+  placeholder,
+  label,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  label: string;
+}) {
+  return (
+    <div className="px-3">
+      <div className="relative">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="pointer-events-none absolute inset-y-0 left-3 my-auto size-4 text-zinc-400">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+        <input
+          type="search"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          aria-label={label}
+          autoComplete="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          className="w-full rounded-lg border border-zinc-200 bg-white py-2 pr-3 pl-9 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-900"
+        />
+      </div>
+    </div>
+  );
+}
+
+function SearchSection({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
+  return (
+    <section aria-label={title}>
+      <h2 className="px-4 pb-1 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+        {title}
+        {count ? <span className="ml-1 font-normal">· {count}</span> : null}
+      </h2>
+      {children}
+    </section>
+  );
 }
 
 const TAB_TITLES: Record<SidebarTab, string> = { chats: "Chats", groups: "Groups", calls: "Calls" };

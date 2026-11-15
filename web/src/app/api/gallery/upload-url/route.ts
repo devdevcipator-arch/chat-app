@@ -3,7 +3,7 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { NextRequest } from "next/server";
 import { getR2 } from "@/lib/r2";
-import { VAULT_MAX_BYTES, VAULT_TYPES, resolveVaultType, vaultKey, type VaultUploadUrlResponse } from "@/lib/vault";
+import { VAULT_MAX_BYTES, resolveVaultType, vaultKey, type VaultUploadUrlResponse } from "@/lib/vault";
 import { authed, fail, ok, readJson } from "@/lib/vault-server";
 
 const URL_TTL_SECONDS = 600;
@@ -31,8 +31,8 @@ export async function POST(request: NextRequest) {
   }
 
   const type = resolveVaultType({ name: fileName, type: fileType });
-  if (!type) return fail(415, "That file type isn't supported.");
-  const { kind } = VAULT_TYPES[type];
+  if (!type) return fail(415, "Executable files can't be uploaded.");
+  const { kind } = type;
   const max = VAULT_MAX_BYTES[kind];
   if (fileSize > max) {
     return fail(413, `${kind[0].toUpperCase()}${kind.slice(1)} files must be ${max / (1024 * 1024)} MB or smaller.`);
@@ -49,16 +49,16 @@ export async function POST(request: NextRequest) {
       new PutObjectCommand({
         Bucket: r2.bucket,
         Key: vaultKey(auth.userId, fileId, type),
-        ContentType: type,
+        ContentType: type.mime,
         ContentLength: fileSize,
       }),
       { expiresIn: URL_TTL_SECONDS, signableHeaders: new Set(["content-type"]) },
     );
     return ok<VaultUploadUrlResponse>({
       fileId,
-      fileType: type,
+      fileType: type.mime,
       uploadUrl,
-      headers: { "Content-Type": type },
+      headers: { "Content-Type": type.mime },
       expiresIn: URL_TTL_SECONDS,
     });
   } catch (error) {

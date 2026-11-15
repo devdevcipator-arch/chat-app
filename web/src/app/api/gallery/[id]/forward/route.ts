@@ -53,18 +53,23 @@ export async function POST(request: NextRequest, ctx: RouteContext<"/api/gallery
   }
 
   const messageType = MESSAGE_TYPE_FOR[asVaultKind(item.file_type)];
-  const { data, error } = await supabase
-    .from("messages")
-    .insert({
-      chat_id: chatId.toLowerCase(),
-      sender_id: userId,
-      message_type: messageType,
-      // Videos and files show their original name in the bubble.
-      content: messageType === "video" || messageType === "file" ? item.file_name : null,
-      media_url: target,
-    })
-    .select()
-    .single();
+  const row = {
+    chat_id: chatId.toLowerCase(),
+    sender_id: userId,
+    message_type: messageType,
+    // Videos and files show their original name in the bubble.
+    content: messageType === "video" || messageType === "file" ? item.file_name : null,
+    media_url: target,
+  };
+  const insert = (withSize: boolean) =>
+    supabase
+      .from("messages")
+      .insert({ ...row, ...(withSize && messageType === "file" ? { file_size: item.file_size } : {}) })
+      .select()
+      .single();
+  let { data, error } = await insert(true);
+  // The size is display-only; tolerate the column not existing yet.
+  if (error?.code === "PGRST204") ({ data, error } = await insert(false));
 
   if (error || !data) {
     console.error("Forward insert failed:", error?.message);

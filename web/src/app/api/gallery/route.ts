@@ -2,7 +2,7 @@ import { DeleteObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import type { NextRequest } from "next/server";
 import { UUID_PATTERN } from "@/lib/chat";
 import { getR2 } from "@/lib/r2";
-import { VAULT_MAX_BYTES, VAULT_TYPES, resolveVaultType, toGalleryItem, vaultKey, type GalleryItem } from "@/lib/vault";
+import { VAULT_MAX_BYTES, resolveVaultType, toGalleryItem, vaultKey, type GalleryItem } from "@/lib/vault";
 import { authed, fail, ok, readJson } from "@/lib/vault-server";
 
 /**
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
   }
   if (typeof fileType !== "string") return fail(400, "Invalid file type.");
   const type = resolveVaultType({ name: fileName, type: fileType });
-  if (!type) return fail(415, "That file type isn't supported.");
+  if (!type) return fail(415, "Executable files can't be uploaded.");
 
   const r2 = getR2();
   if (!r2) return fail(503, "Media uploads aren't configured yet.");
@@ -35,11 +35,11 @@ export async function POST(request: NextRequest) {
   try {
     const head = await r2.client.send(new HeadObjectCommand({ Bucket: r2.bucket, Key: key }));
     size = head.ContentLength ?? 0;
-    if (head.ContentType !== type) return fail(400, "The uploaded file doesn't match its type.");
+    if (head.ContentType !== type.mime) return fail(400, "The uploaded file doesn't match its type.");
   } catch {
     return fail(404, "Upload not found. Please try again.");
   }
-  const kind = VAULT_TYPES[type].kind;
+  const { kind } = type;
   if (size <= 0 || size > VAULT_MAX_BYTES[kind]) return fail(413, "That file is too large.");
 
   const { data, error } = await auth.supabase

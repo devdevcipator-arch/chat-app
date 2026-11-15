@@ -165,7 +165,9 @@ abstract final class ChatRepository {
       onProgress: onProgress,
     );
 
-    final kind = messageType ?? type.messageType;
+    // The server resolves the stored type from the file name (e.g. an .epub
+    // picked as application/octet-stream) and says how to post it.
+    final kind = messageType ?? (target['messageType'] as String?) ?? type.messageType;
     final row = <String, Object?>{
       'id': id,
       'chat_id': chatId,
@@ -177,18 +179,22 @@ abstract final class ChatRepository {
       'duration_seconds': ?durationSeconds,
     };
 
+    Future<ChatMessage> insert(Map<String, Object?> values) async =>
+        ChatMessage.fromMap(await supabase.from('messages').insert(values).select().single());
+
+    // Optional extras, dropped one by one if the server refuses them.
+    final extras = <String, Object?>{
+      if (kind == 'file') 'file_size': size, // shown on the file card
+      'call_id': ?callId,
+    };
     try {
-      final saved = await supabase
-          .from('messages')
-          .insert({...row, 'call_id': ?callId})
-          .select()
-          .single();
-      return ChatMessage.fromMap(saved);
-    } on PostgrestException {
-      // Linking a voicemail to its call is a nicety: still deliver it unlinked.
-      if (callId == null) rethrow;
-      final saved = await supabase.from('messages').insert(row).select().single();
-      return ChatMessage.fromMap(saved);
+      return await insert({...row, ...extras});
+    } on PostgrestException catch (e) {
+      if (extras.isEmpty) rethrow;
+      // PGRST204: file_size column not there yet (migration pending).
+      // Otherwise: linking a voicemail to its call is a nicety.
+      if (e.code == 'PGRST204' && callId != null) return insert({...row, 'call_id': callId});
+      return insert(row);
     }
   }
 
