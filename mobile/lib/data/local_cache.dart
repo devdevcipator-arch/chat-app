@@ -160,6 +160,31 @@ abstract final class LocalCache {
     } catch (_) {}
   }
 
+  // --- Calls badge ---------------------------------------------------------------
+
+  /// When I last opened the Calls tab (`last_seen_calls_at`).
+  static DateTime? callsSeenAt(String userId) {
+    final raw = _prefs?.getString(_key(userId, 'lastSeenCallsAt'));
+    return raw == null ? null : DateTime.tryParse(raw);
+  }
+
+  static Future<void> saveCallsSeenAt(String userId, DateTime at) async {
+    if (!_isActive(userId)) return;
+    try {
+      await _prefs?.setString(_key(userId, 'lastSeenCallsAt'), at.toUtc().toIso8601String());
+    } catch (_) {}
+  }
+
+  /// The last known unseen missed-call count, so the badge shows offline too.
+  static int? missedCalls(String userId) => _prefs?.getInt(_key(userId, 'missedCalls'));
+
+  static Future<void> saveMissedCalls(String userId, int count) async {
+    if (!_isActive(userId)) return;
+    try {
+      await _prefs?.setInt(_key(userId, 'missedCalls'), count);
+    } catch (_) {}
+  }
+
   // --- Sign-out ----------------------------------------------------------------
 
   /// Removes every cached entry (all users) and the last-user record.

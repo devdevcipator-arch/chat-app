@@ -46,6 +46,11 @@ class ChatMessage {
 
   String? get publicUrl => mediaPublicUrl(mediaUrl);
   bool get isEdited => editedAt != null;
+
+  /// A call receipt posted by the server ("📞 Voice call · 01:23",
+  /// "📹 Missed video call", …).
+  bool get isCallReceipt =>
+      type == 'system' && (content?.startsWith('📞') == true || content?.startsWith('📹') == true);
   bool get isMedia => const {'image', 'audio', 'video', 'file', 'voicemail'}.contains(type);
 
   /// Whether [meId] may still edit this message (text, own, within 10 minutes).

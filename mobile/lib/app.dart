@@ -14,6 +14,7 @@ import 'screens/chat_list_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'services/call_controller.dart';
+import 'services/missed_calls.dart';
 import 'services/network_status.dart';
 
 final _navigatorKey = GlobalKey<NavigatorState>();
@@ -176,6 +177,7 @@ class _AuthGateState extends State<AuthGate> {
 
     if (user == null) {
       _profile = null;
+      MissedCalls.instance.detach();
       await CallController.instance.detach();
       await LocalCache.clear();
       _setStage(_Stage.signedOut);

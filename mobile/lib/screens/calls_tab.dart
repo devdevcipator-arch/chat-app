@@ -238,6 +238,8 @@ class _CallsTabState extends State<CallsTab> {
                 final canRedial = !log.isGroup && log.peer != null && !_calls.busy;
 
                 return ListTile(
+                  key: ValueKey(log.id),
+                  isThreeLine: true,
                   onTap: () => widget.onOpenChat(log.chatId),
                   leading: Avatar(
                     name: name,
@@ -245,36 +247,36 @@ class _CallsTabState extends State<CallsTab> {
                     group: log.isGroup,
                     size: 44,
                   ),
-                  title: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: bad ? TextStyle(color: badColor) : null,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        formatListTime(context, log.createdAt),
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
-                      ),
-                    ],
+                  title: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: bad ? TextStyle(color: badColor) : null,
                   ),
-                  subtitle: Row(
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(log.video ? Icons.videocam_outlined : Icons.call_outlined, size: 14, color: bad ? badColor : null),
-                      const SizedBox(width: 2),
-                      _DirectionIcon(direction: log.direction, color: bad ? badColor : null),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          status,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: bad ? TextStyle(color: badColor) : null,
-                        ),
+                      Row(
+                        children: [
+                          Icon(log.video ? Icons.videocam_outlined : Icons.call_outlined, size: 14, color: bad ? badColor : null),
+                          const SizedBox(width: 2),
+                          _DirectionIcon(direction: log.direction, color: bad ? badColor : null),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              status,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: bad ? TextStyle(color: badColor) : null,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      // Always the full date and time, e.g. "Nov 15, 2026 · 4:15 PM".
+                      Text(
+                        formatDateTime(context, log.createdAt),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
                       ),
                     ],
                   ),

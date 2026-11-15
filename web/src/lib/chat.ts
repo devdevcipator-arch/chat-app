@@ -203,3 +203,28 @@ export function formatListTime(iso: string) {
   if (ageDays < 6) return date.toLocaleDateString(undefined, { weekday: "short" });
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
+
+/** Date and time together, e.g. "Nov 15, 2026 · 4:15 PM" (call history and receipts). */
+export function formatDateTime(iso: string) {
+  const date = new Date(iso);
+  const day = date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${day} · ${time}`;
+}
+
+/** A server-posted call receipt ("📞 Voice call · 01:23", "📹 Missed video call", …). */
+export function isCallReceipt(message: { message_type: string; content: string | null }) {
+  return message.message_type === "system" && /^(📞|📹)/u.test(message.content ?? "");
+}
+
+/**
+ * Sidebar search: groups match their title; direct chats the other person's
+ * display name or @username. Case-insensitive; a leading "@" is ignored.
+ */
+export function chatMatches(chat: ChatSummary, query: string) {
+  const q = query.trim().toLowerCase().replace(/^@/, "");
+  if (!q) return true;
+  if (chat.type === "group") return (chat.title ?? "").toLowerCase().includes(q);
+  const other = chat.other;
+  return [other?.displayName, other?.username, chatName(chat)].some((v) => (v ?? "").toLowerCase().includes(q));
+}

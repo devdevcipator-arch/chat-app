@@ -49,6 +49,19 @@ class ChatSummary {
   final int unreadCount;
 
   bool get isGroup => type == 'group';
+
+  /// Search: groups match on their title; direct chats on the other
+  /// person's display name or @username. Case-insensitive; a leading "@"
+  /// is ignored. An empty query matches everything.
+  bool matches(String query) {
+    final q = query.trim().toLowerCase().replaceFirst(RegExp(r'^@'), '');
+    if (q.isEmpty) return true;
+    if (isGroup) return (title ?? '').toLowerCase().contains(q);
+    final o = other;
+    return (o?.displayName ?? '').toLowerCase().contains(q) ||
+        (o?.username ?? '').toLowerCase().contains(q) ||
+        name.toLowerCase().contains(q);
+  }
   DateTime get lastActivity => lastMessage?.createdAt ?? createdAt;
   String get name => isGroup ? ((title?.isNotEmpty ?? false) ? title! : 'Group') : profileName(other);
 

@@ -10,6 +10,7 @@ import type { Profile } from "@/lib/auth";
 import { markRead } from "@/lib/chat-actions";
 import { onChatEvent } from "@/lib/chat-events";
 import {
+  chatMatches,
   chatName,
   formatListTime,
   messageSnippet,
@@ -26,6 +27,7 @@ import { NewGroupButton } from "./new-group-dialog";
 import { NotificationPrompt } from "./notification-prompt";
 import { BottomNav, GalleryIcon, NavRail, type SidebarTab, type TabBadges } from "./sidebar-nav";
 import { usePageActive, useUnreadTitle } from "./use-page-attention";
+import { useMissedCalls } from "./use-missed-calls";
 import { UserSearch } from "./user-search";
 
 const CHAT_PATH = /^\/chat\/([0-9a-f-]{36})/i;
@@ -248,23 +250,30 @@ export function ChatSidebar({
   }
 
   const [groupFilter, setGroupFilter] = useState("");
+  const [chatQuery, setChatQuery] = useState("");
   // Chats: every conversation (direct + groups), newest activity first.
   // Groups: group chats only.
   const allChats = [...chats].sort((a, b) => lastActivity(b) - lastActivity(a));
   const allGroups = allChats.filter((c) => c.type === "group");
-  const groupQuery = groupFilter.trim().toLowerCase();
-  const groupChats = groupQuery
-    ? allGroups.filter((c) => chatName(c).toLowerCase().includes(groupQuery))
-    : allGroups;
+  // Chats search: direct chats by name / @username, groups by title.
+  const chatSearch = chatQuery.trim();
+  const shownChats = chatSearch ? allChats.filter((c) => chatMatches(c, chatSearch)) : allChats;
+  const groupQuery = groupFilter.trim();
+  const groupChats = groupQuery ? allGroups.filter((c) => chatMatches(c, groupQuery)) : allGroups;
+  const { count: missedCalls, markSeen: markCallsSeen } = useMissedCalls(me.id, tab === "calls");
+  const selectTab = (next: SidebarTab) => {
+    setTab(next);
+    if (next === "calls") markCallsSeen(); // opening Calls clears its badge
+  };
   const unreadOf = (list: ChatSummary[]) =>
     list.reduce((sum, c) => sum + (c.isMuted || c.chatId === activeChatId ? 0 : c.unreadCount), 0);
-  const badges: TabBadges = { chats: unreadOf(allChats), groups: unreadOf(allGroups) };
+  const badges: TabBadges = { chats: unreadOf(allChats), groups: unreadOf(allGroups), calls: missedCalls };
 
   return (
     <>
       <NavRail
         active={tab}
-        onChange={setTab}
+        onChange={selectTab}
         badges={badges}
         me={{ name: myName, username: me.username, avatarUrl: me.avatarUrl }}
       />
@@ -300,7 +309,14 @@ export function ChatSidebar({
           </div>
         </div>
 
-        {tab === "chats" && <UserSearch meId={me.id} onStartChat={startChat} />}
+        {tab === "chats" && (
+          <UserSearch
+            meId={me.id}
+            onStartChat={startChat}
+            onQueryChange={setChatQuery}
+            hasLocalMatches={chatSearch !== "" && shownChats.length > 0}
+          />
+        )}
         {tab === "groups" && (
           <div className="px-3">
             <input
@@ -321,15 +337,17 @@ export function ChatSidebar({
             <CallsPanel meId={me.id} chats={chats} />
           ) : (
             <ChatList
-              chats={tab === "groups" ? groupChats : allChats}
+              chats={tab === "groups" ? groupChats : shownChats}
               meId={me.id}
               activeChatId={activeChatId}
               empty={
                 tab === "groups"
                   ? groupQuery
-                    ? "No groups match your search."
+                    ? "No matching groups."
                     : "No groups yet. Create one with “New group”."
-                  : "No conversations yet. Search for an @username to start one."
+                  : chatSearch
+                    ? "No matching chats."
+                    : "No conversations yet. Search for an @username to start one."
               }
             />
           )}
@@ -342,7 +360,7 @@ export function ChatSidebar({
         </div>
       </div>
 
-      <BottomNav active={tab} onChange={setTab} badges={badges} />
+      <BottomNav active={tab} onChange={selectTab} badges={badges} />
       {/* Mobile footer: the very last thing on the page, under the tab bar.
           Sign out lives on the Profile & Settings page on mobile. */}
       <div className="flex shrink-0 items-center gap-2 border-t border-zinc-200 px-3 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] md:hidden dark:border-zinc-800">

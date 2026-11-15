@@ -18,12 +18,22 @@ type Result =
 
 const DEBOUNCE_MS = 350;
 
+/**
+ * One box for both: filters my conversations (via onQueryChange: direct
+ * chats by name or @username, groups by title) and, when the text is a valid
+ * username, looks that exact @username up to start a new chat.
+ */
 export function UserSearch({
   meId,
   onStartChat,
+  onQueryChange,
+  hasLocalMatches = false,
 }: {
   meId: string;
   onStartChat: (otherUserId: string) => Promise<string | null>;
+  onQueryChange: (query: string) => void;
+  /** Conversations already match: skip "Searching…" / "No one goes by @x". */
+  hasLocalMatches?: boolean;
 }) {
   const [supabase] = useState(createClient);
   const [query, setQuery] = useState("");
@@ -57,11 +67,13 @@ export function UserSearch({
   }
 
   function handleChange(raw: string) {
-    const username = normalizeUsername(raw);
-    setQuery(username);
+    setQuery(raw);
+    onQueryChange(raw);
+    const candidate = raw.trim().toLowerCase().replace(/^@/, "");
+    const username = normalizeUsername(candidate);
     latest.current = username;
     if (timer.current) clearTimeout(timer.current);
-    if (!isValidUsername(username)) return setResult({ kind: "idle" });
+    if (username !== candidate || !isValidUsername(username)) return setResult({ kind: "idle" });
     setResult({ kind: "searching" });
     timer.current = setTimeout(() => void lookup(username), DEBOUNCE_MS);
   }
@@ -72,6 +84,7 @@ export function UserSearch({
     setStarting(false);
     if (error) return setResult({ kind: "error", message: error });
     setQuery("");
+    onQueryChange("");
     latest.current = "";
     setResult({ kind: "idle" });
   }
@@ -79,7 +92,6 @@ export function UserSearch({
   return (
     <div className="px-3">
       <div className="relative">
-        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-zinc-400">@</span>
         <input
           type="search"
           value={query}
@@ -87,17 +99,17 @@ export function UserSearch({
           onKeyDown={(e) => {
             if (e.key === "Enter" && result.kind === "found" && !starting) void start(result.profile);
           }}
-          placeholder="Find by exact username"
-          aria-label="Find a user by exact username"
+          placeholder="Search chats or find @username"
+          aria-label="Search chats, or find a user by exact username"
           autoComplete="off"
           autoCapitalize="none"
           spellCheck={false}
-          className="w-full rounded-lg border border-zinc-200 bg-white py-2 pr-3 pl-7 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-900"
+          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-900"
         />
       </div>
 
       <AnimatePresence initial={false}>
-        {result.kind !== "idle" && (
+        {result.kind !== "idle" && !(hasLocalMatches && (result.kind === "searching" || result.kind === "none")) && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}

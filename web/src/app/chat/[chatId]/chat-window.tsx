@@ -19,7 +19,9 @@ import {
   MESSAGE_PAGE_SIZE,
   chatName,
   editWindowLeftMs,
+  formatDateTime,
   formatMessageTime,
+  isCallReceipt,
   mergeMessages,
   profileName,
   type ChatDetails,
@@ -658,6 +660,20 @@ function MessageBubble({
   onVoicemailPlayed: (id: string) => void;
 }) {
   const canEdit = useEditWindowOpen(message.created_at, editable);
+
+  if (isCallReceipt(message)) {
+    // "📞 Voice call · 01:23" with the full date and time beside it.
+    return (
+      <li className="my-2 flex justify-center">
+        <span className="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 rounded-full bg-zinc-100 px-3 py-1 text-xs dark:bg-zinc-800/80">
+          <span className="font-medium text-zinc-700 dark:text-zinc-200">{message.content}</span>
+          <time suppressHydrationWarning dateTime={message.created_at} className="text-zinc-500">
+            {formatDateTime(message.created_at)}
+          </time>
+        </span>
+      </li>
+    );
+  }
 
   if (message.message_type === "system") {
     return <li className="my-2 text-center text-xs text-zinc-500">{message.content}</li>;

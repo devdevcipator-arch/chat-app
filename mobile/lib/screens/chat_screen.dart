@@ -819,6 +819,32 @@ class _MessageBubble extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final small = Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant);
 
+    if (message.isCallReceipt) {
+      // "📞 Voice call · 01:23" with the full date and time beside it.
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 2,
+              children: [
+                Text(message.content ?? '', style: small?.copyWith(color: scheme.onSurface, fontWeight: FontWeight.w500)),
+                Text(formatDateTime(context, message.createdAt), style: small),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (message.type == 'system') {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),

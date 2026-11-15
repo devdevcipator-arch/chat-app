@@ -71,6 +71,12 @@ class CallController extends ChangeNotifier {
   Timer? _incomingTimer;
   Timer? _heartbeatTimer;
   Timer? _dismissTimer;
+
+  final _rowChanges = StreamController<CallRow>.broadcast();
+
+  /// Every change to a call I am party to (from the Realtime channel opened
+  /// in [attach]), for listeners such as the missed-calls badge.
+  Stream<CallRow> get rowChanges => _rowChanges.stream;
   int _gen = 0;
 
   bool get busy => phase != CallPhase.idle && phase != CallPhase.ended;
@@ -104,6 +110,7 @@ class CallController extends ChangeNotifier {
   // --- Signaling -------------------------------------------------------------
 
   void _onCallChange(String event, CallRow row) {
+    _rowChanges.add(row);
     if (row.isGroup) return; // group rooms never ring; the chat screen shows them
     final current = call;
     switch (row.status) {

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Avatar } from "@/components/avatar";
 import { asCallType, type CallType } from "@/lib/call/types";
-import { chatName, formatDuration, formatListTime, profileName, type ChatSummary, type PublicProfile } from "@/lib/chat";
+import { chatName, formatDateTime, formatDuration, profileName, type ChatSummary, type PublicProfile } from "@/lib/chat";
 import { createClient } from "@/lib/supabase/client";
 import { useCall } from "./call/call-provider";
 import { PhoneIcon, VideoIcon } from "./call/icons";
@@ -206,18 +206,7 @@ export function CallsPanel({ meId, chats }: { meId: string; chats: ChatSummary[]
             >
               <Avatar name={name} src={log.isGroup ? null : peer?.avatarUrl} group={log.isGroup} />
               <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-1.5">
-                  <p className={`min-w-0 flex-1 truncate text-sm font-medium ${bad ? "text-red-600 dark:text-red-400" : ""}`}>
-                    {name}
-                  </p>
-                  <time
-                    suppressHydrationWarning
-                    dateTime={log.createdAt}
-                    className="shrink-0 text-[11px] text-zinc-500"
-                  >
-                    {formatListTime(log.createdAt)}
-                  </time>
-                </div>
+                <p className={`truncate text-sm font-medium ${bad ? "text-red-600 dark:text-red-400" : ""}`}>{name}</p>
                 <p
                   className={`flex items-center gap-1 truncate text-xs ${
                     bad ? "text-red-600 dark:text-red-400" : "text-zinc-500"
@@ -227,6 +216,10 @@ export function CallsPanel({ meId, chats }: { meId: string; chats: ChatSummary[]
                   <DirectionArrow direction={log.direction} />
                   <span className="truncate">{status}</span>
                 </p>
+                {/* Always the full date and time, e.g. "Nov 15, 2026 · 4:15 PM". */}
+                <time suppressHydrationWarning dateTime={log.createdAt} className="block text-[11px] text-zinc-500">
+                  {formatDateTime(log.createdAt)}
+                </time>
               </div>
             </Link>
             <div className="absolute inset-y-0 right-1.5 flex items-center">

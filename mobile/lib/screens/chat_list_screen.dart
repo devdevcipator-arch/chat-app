@@ -15,6 +15,7 @@ import '../models/chat_message.dart';
 import '../models/chat_summary.dart';
 import '../models/profile.dart';
 import '../services/call_controller.dart';
+import '../services/missed_calls.dart';
 import '../services/network_status.dart';
 import '../widgets/avatar.dart';
 import '../widgets/offline_banner.dart';
@@ -67,7 +68,20 @@ class _ChatListScreenState extends State<ChatListScreen> {
     _refresh();
     _subscribe();
     unawaited(CallController.instance.attach(widget.me.id));
+    MissedCalls.instance
+      ..attach(widget.me.id)
+      ..addListener(_onMissedCalls);
     _reconnectSub = NetworkStatus.instance.reconnects.listen((_) => _onReconnect());
+  }
+
+  /// Calls badge: redraw, and keep it at zero while the Calls tab is in view.
+  void _onMissedCalls() {
+    if (!mounted) return;
+    if (_tab == 2 && MissedCalls.instance.value > 0 && (ModalRoute.of(context)?.isCurrent ?? true)) {
+      MissedCalls.instance.markSeen();
+      return;
+    }
+    setState(() {});
   }
 
   /// Back online: catch up, and re-join Realtime if the channel gave up.
@@ -91,6 +105,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   void dispose() {
     _refreshDebounce?.cancel();
     _reconnectSub?.cancel();
+    MissedCalls.instance.removeListener(_onMissedCalls);
     if (_persistDebounce?.isActive ?? false) {
       _persistDebounce!.cancel();
       unawaited(LocalCache.saveChats(widget.me.id, _chatList));
@@ -309,6 +324,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
   bool _callsVisited = false;
   final _groupFilter = TextEditingController();
 
+  /// What's typed in the Chats search box (filters direct chats and groups).
+  String _chatQuery = '';
+
   static const _titles = ['Chats', 'Groups', 'Calls'];
 
   int _unreadOf(Iterable<ChatSummary> chats) =>
@@ -328,8 +346,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
     // Groups: group chats only.
     final all = [..._chats]..sort((a, b) => b.lastActivity.compareTo(a.lastActivity));
     final allGroups = all.where((c) => c.isGroup).toList();
-    final query = _groupFilter.text.trim().toLowerCase();
-    final groups = query.isEmpty ? allGroups : allGroups.where((c) => c.name.toLowerCase().contains(query)).toList();
+    final chatQuery = _chatQuery.trim();
+    final chats = chatQuery.isEmpty ? all : all.where((c) => c.matches(chatQuery)).toList();
+    final query = _groupFilter.text.trim();
+    final groups = query.isEmpty ? allGroups : allGroups.where((c) => c.matches(query)).toList();
+    final missedCalls = MissedCalls.instance.value;
 
     return Scaffold(
       appBar: AppBar(
@@ -360,9 +381,21 @@ class _ChatListScreenState extends State<ChatListScreen> {
               children: [
                 Column(
                   children: [
-                    _UserSearch(meId: me.id, onStartChat: _startChat),
+                    _UserSearch(
+                      meId: me.id,
+                      onStartChat: _startChat,
+                      onQueryChanged: (q) => setState(() => _chatQuery = q),
+                      // A matching conversation is answer enough; don't also say "no one goes by @x".
+                      hasLocalMatches: chatQuery.isNotEmpty && chats.isNotEmpty,
+                    ),
                     Expanded(
-                      child: _buildList(context, all, 'No conversations yet.\nSearch for an @username to start one.'),
+                      child: _buildList(
+                        context,
+                        chats,
+                        chatQuery.isNotEmpty
+                            ? 'No matching chats.'
+                            : 'No conversations yet.\nSearch for an @username to start one.',
+                      ),
                     ),
                   ],
                 ),
@@ -388,7 +421,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       child: _buildList(
                         context,
                         groups,
-                        query.isNotEmpty ? 'No groups match your search.' : 'No groups yet.\nTap + to create one.',
+                        query.isNotEmpty ? 'No matching groups.' :'No groups yet.\nTap + to create one.',
                       ),
                     ),
                   ],
@@ -424,7 +457,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
               selectedIndex: _tab,
               onDestinationSelected: (i) => setState(() {
                 _tab = i;
-                if (i == 2) _callsVisited = true;
+                if (i == 2) {
+                  _callsVisited = true;
+                  MissedCalls.instance.markSeen(); // opening Calls clears its badge
+                }
               }),
               destinations: [
                 NavigationDestination(
@@ -437,7 +473,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   selectedIcon: _badgeIcon(Icons.group, _unreadOf(allGroups)),
                   label: 'Groups',
                 ),
-                const NavigationDestination(icon: Icon(Icons.call_outlined), selectedIcon: Icon(Icons.call), label: 'Calls'),
+                NavigationDestination(
+                  icon: _badgeIcon(Icons.call_outlined, missedCalls),
+                  selectedIcon: _badgeIcon(Icons.call, missedCalls),
+                  label: 'Calls',
+                ),
               ],
             ),
           ),
@@ -662,17 +702,31 @@ class _Failed extends _SearchState {
 }
 
 class _UserSearch extends StatefulWidget {
-  const _UserSearch({required this.meId, required this.onStartChat});
+  const _UserSearch({
+    required this.meId,
+    required this.onStartChat,
+    required this.onQueryChanged,
+    this.hasLocalMatches = false,
+  });
 
   final String meId;
 
   /// Returns an error message, or null on success.
   final Future<String?> Function(Profile other) onStartChat;
 
+  /// The raw text, for filtering the conversation list below.
+  final ValueChanged<String> onQueryChanged;
+
+  /// Hides "No one goes by @x" when conversations already match.
+  final bool hasLocalMatches;
+
   @override
   State<_UserSearch> createState() => _UserSearchState();
 }
 
+/// One box for both: filters my conversations (direct chats by name or
+/// @username, groups by title) and, when the text is a valid username,
+/// looks that exact @username up to start a new chat.
 class _UserSearchState extends State<_UserSearch> {
   final _controller = TextEditingController();
   _SearchState _state = const _Idle();
@@ -687,10 +741,13 @@ class _UserSearchState extends State<_UserSearch> {
     super.dispose();
   }
 
-  void _onChanged(String username) {
+  void _onChanged(String text) {
+    widget.onQueryChanged(text);
     _timer?.cancel();
+    final candidate = text.trim().toLowerCase().replaceFirst(RegExp(r'^@'), '');
+    final username = normalizeUsername(candidate);
     _latest = username;
-    if (!isValidUsername(username)) {
+    if (username != candidate || !isValidUsername(username)) {
       setState(() => _state = const _Idle());
       return;
     }
@@ -723,6 +780,7 @@ class _UserSearchState extends State<_UserSearch> {
       if (error == null) {
         _controller.clear();
         _latest = '';
+        widget.onQueryChanged('');
         _state = const _Idle();
       } else {
         _state = _Failed(error);
@@ -742,16 +800,14 @@ class _UserSearchState extends State<_UserSearch> {
             autocorrect: false,
             enableSuggestions: false,
             textInputAction: TextInputAction.search,
-            inputFormatters: [UsernameInputFormatter()],
             onChanged: _onChanged,
             onSubmitted: (_) {
               final state = _state;
               if (state is _Found && !_starting) _start(state.profile);
             },
             decoration: InputDecoration(
-              hintText: 'Find by exact username',
+              hintText: 'Search chats or find @username',
               prefixIcon: const Icon(Icons.search),
-              prefixText: '@',
               isDense: true,
               filled: true,
               fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
@@ -784,12 +840,15 @@ class _UserSearchState extends State<_UserSearch> {
     final muted = TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant);
     final Widget? body = switch (_state) {
       _Idle() => null,
+      _Searching() when widget.hasLocalMatches => null,
       _Searching() => const ListTile(
           dense: true,
           leading: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
           title: Text('Searching…'),
         ),
-      _NotFound(:final username) => ListTile(dense: true, title: Text('No one goes by @$username.', style: muted)),
+      _NotFound(:final username) => widget.hasLocalMatches
+          ? null
+          : ListTile(dense: true, title: Text('No one goes by @$username.', style: muted)),
       _Self() => ListTile(dense: true, title: Text("That's you.", style: muted)),
       _Failed(:final message) => ListTile(
           dense: true,

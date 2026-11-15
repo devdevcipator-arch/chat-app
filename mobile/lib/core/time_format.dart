@@ -27,3 +27,18 @@ String formatListTime(BuildContext context, DateTime time) {
   }
   return l10n.formatShortMonthDay(local);
 }
+
+/// Date and time together, e.g. "Nov 15, 2026 · 4:15 PM" (or "· 16:15" with
+/// a 24-hour clock). Used where the exact moment matters: call history and
+/// call receipts.
+String formatDateTimeWith(MaterialLocalizations l10n, DateTime time, {bool use24h = false}) {
+  final local = time.toLocal();
+  final clock = l10n.formatTimeOfDay(TimeOfDay.fromDateTime(local), alwaysUse24HourFormat: use24h);
+  return '${l10n.formatShortMonthDay(local)}, ${local.year} · $clock';
+}
+
+String formatDateTime(BuildContext context, DateTime time) => formatDateTimeWith(
+      MaterialLocalizations.of(context),
+      time,
+      use24h: MediaQuery.alwaysUse24HourFormatOf(context),
+    );
