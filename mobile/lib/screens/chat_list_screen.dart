@@ -9,12 +9,15 @@ import '../core/supabase.dart';
 import '../core/time_format.dart';
 import '../core/username.dart';
 import '../data/chat_repository.dart';
+import '../data/local_cache.dart';
 import '../data/profile_repository.dart';
 import '../models/chat_message.dart';
 import '../models/chat_summary.dart';
 import '../models/profile.dart';
 import '../services/call_controller.dart';
+import '../services/network_status.dart';
 import '../widgets/avatar.dart';
+import '../widgets/offline_banner.dart';
 import 'calls_tab.dart';
 import 'chat_screen.dart';
 import 'gallery_screen.dart';
@@ -33,11 +36,27 @@ class ChatListScreen extends StatefulWidget {
 
 class _ChatListScreenState extends State<ChatListScreen> {
   late Profile _me = widget.me;
-  List<ChatSummary> _chats = const [];
-  bool _loading = true;
+
+  // Hydrated from the local cache on the first frame; every change is
+  // written back (debounced) so the next launch, or an offline one, opens
+  // instantly with the latest list.
+  late final List<ChatSummary>? _cached = LocalCache.chats(widget.me.id);
+  late List<ChatSummary> _chatList = _cached ?? const [];
+  List<ChatSummary> get _chats => _chatList;
+  set _chats(List<ChatSummary> chats) {
+    _chatList = chats;
+    _persistDebounce?.cancel();
+    _persistDebounce = Timer(const Duration(milliseconds: 500), () => LocalCache.saveChats(widget.me.id, _chatList));
+  }
+
+  /// Only a first launch with nothing cached shows a spinner.
+  late bool _loading = _cached == null;
   String? _loadError;
   RealtimeChannel? _channel;
+  bool _channelLive = false;
   Timer? _refreshDebounce;
+  Timer? _persistDebounce;
+  StreamSubscription<void>? _reconnectSub;
 
   /// The chat currently open on top of the list (its unread count stays 0).
   String? _openChatId;
@@ -48,6 +67,18 @@ class _ChatListScreenState extends State<ChatListScreen> {
     _refresh();
     _subscribe();
     unawaited(CallController.instance.attach(widget.me.id));
+    _reconnectSub = NetworkStatus.instance.reconnects.listen((_) => _onReconnect());
+  }
+
+  /// Back online: catch up, and re-join Realtime if the channel gave up.
+  void _onReconnect() {
+    if (!mounted) return;
+    unawaited(_refresh());
+    final channel = _channel;
+    if (channel == null || _channelLive) return;
+    _channel = null;
+    unawaited(supabase.removeChannel(channel));
+    _subscribe();
   }
 
   @override
@@ -59,6 +90,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   void dispose() {
     _refreshDebounce?.cancel();
+    _reconnectSub?.cancel();
+    if (_persistDebounce?.isActive ?? false) {
+      _persistDebounce!.cancel();
+      unawaited(LocalCache.saveChats(widget.me.id, _chatList));
+    }
     _groupFilter.dispose();
     final channel = _channel;
     if (channel != null) unawaited(supabase.removeChannel(channel));
@@ -68,6 +104,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Future<void> _refresh() async {
     try {
       final chats = await ChatRepository.listMyChats();
+      NetworkStatus.instance.reportSuccess();
       if (!mounted) return;
       setState(() {
         _chats = chats;
@@ -75,6 +112,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
         _loadError = null;
       });
     } catch (e) {
+      // Cached chats stay on screen; the offline banner explains why.
+      NetworkStatus.instance.reportFailure(e);
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -130,7 +169,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
         )
         .subscribe((status, error) {
           // Catch up on anything missed while (re)connecting.
-          if (status == RealtimeSubscribeStatus.subscribed) _refreshSoon();
+          _channelLive = status == RealtimeSubscribeStatus.subscribed;
+          if (_channelLive) {
+            NetworkStatus.instance.reportSuccess();
+            _refreshSoon();
+          }
         });
   }
 
@@ -154,6 +197,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     if (!mounted) return;
     if (result == chatRemoved) {
       setState(() => _chats = _chats.where((c) => c.chatId != chatId).toList());
+      unawaited(LocalCache.removeMessages(widget.me.id, chatId));
     }
     unawaited(_refresh());
     if (result is String && result.startsWith('open:')) {
@@ -319,53 +363,60 @@ class _ChatListScreenState extends State<ChatListScreen> {
               child: const Icon(Icons.group_add_outlined),
             )
           : null,
-      body: IndexedStack(
-        index: _tab,
+      body: Column(
         children: [
-          Column(
-            children: [
-              _UserSearch(meId: me.id, onStartChat: _startChat),
-              Expanded(
-                child: _buildList(context, direct, 'No conversations yet.\nSearch for an @username to start one.'),
-              ),
-            ],
-          ),
-          Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                child: TextField(
-                  controller: _groupFilter,
-                  onChanged: (_) => setState(() {}),
-                  textInputAction: TextInputAction.search,
-                  decoration: InputDecoration(
-                    hintText: 'Search groups',
-                    prefixIcon: const Icon(Icons.search),
-                    isDense: true,
-                    filled: true,
-                    fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                  ),
+          const OfflineBanner(message: 'Offline — showing cached chats'),
+          Expanded(
+            child: IndexedStack(
+              index: _tab,
+              children: [
+                Column(
+                  children: [
+                    _UserSearch(meId: me.id, onStartChat: _startChat),
+                    Expanded(
+                      child: _buildList(context, direct, 'No conversations yet.\nSearch for an @username to start one.'),
+                    ),
+                  ],
                 ),
-              ),
-              Expanded(
-                child: _buildList(
-                  context,
-                  groups,
-                  query.isNotEmpty ? 'No groups match your search.' : 'No groups yet.\nTap + to create one.',
+                Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      child: TextField(
+                        controller: _groupFilter,
+                        onChanged: (_) => setState(() {}),
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          hintText: 'Search groups',
+                          prefixIcon: const Icon(Icons.search),
+                          isDense: true,
+                          filled: true,
+                          fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildList(
+                        context,
+                        groups,
+                        query.isNotEmpty ? 'No groups match your search.' : 'No groups yet.\nTap + to create one.',
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
+                // Built on first visit, so the call history isn't fetched at launch.
+                if (_callsVisited)
+                  CallsTab(
+                    meId: me.id,
+                    chats: _chats,
+                    onOpenChat: (chatId) => _openChat(chatId, summary: _chats.where((c) => c.chatId == chatId).firstOrNull),
+                  )
+                else
+                  const SizedBox.shrink(),
+              ],
+            ),
           ),
-          // Built on first visit, so the call history isn't fetched at launch.
-          if (_callsVisited)
-            CallsTab(
-              meId: me.id,
-              chats: _chats,
-              onOpenChat: (chatId) => _openChat(chatId, summary: _chats.where((c) => c.chatId == chatId).firstOrNull),
-            )
-          else
-            const SizedBox.shrink(),
         ],
       ),
       bottomNavigationBar: Column(
@@ -472,6 +523,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
               itemCount: chats.length,
               separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
               itemBuilder: (context, i) => _ChatTile(
+                key: ValueKey(chats[i].chatId),
                 chat: chats[i],
                 meId: _me.id,
                 onTap: () => _openChat(chats[i].chatId, summary: chats[i]),
@@ -513,7 +565,7 @@ class _PoweredBy extends StatelessWidget {
 }
 
 class _ChatTile extends StatelessWidget {
-  const _ChatTile({required this.chat, required this.meId, required this.onTap, required this.onLongPress});
+  const _ChatTile({super.key, required this.chat, required this.meId, required this.onTap, required this.onLongPress});
 
   final ChatSummary chat;
   final String meId;

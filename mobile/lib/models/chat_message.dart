@@ -71,6 +71,22 @@ class ChatMessage {
         voicemailPlayedAt: _date(map['voicemail_played_at']),
       );
 
+  /// Inverse of [ChatMessage.fromMap] (used by the local cache; local-only
+  /// fields such as status and progress are not kept).
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'chat_id': chatId,
+        'sender_id': senderId,
+        'message_type': type,
+        'content': content,
+        'media_url': mediaUrl,
+        'created_at': createdAt.toIso8601String(),
+        'duration_seconds': durationSeconds,
+        'edited_at': editedAt?.toIso8601String(),
+        'call_id': callId,
+        'voicemail_played_at': voicemailPlayedAt?.toIso8601String(),
+      };
+
   ChatMessage copyWith({
     MessageStatus? status,
     double? progress,

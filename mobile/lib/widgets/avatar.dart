@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 /// Profile/group photo with an initials fallback.
@@ -43,14 +44,16 @@ class Avatar extends StatelessWidget {
       child: url == null
           ? fallback
           : ClipOval(
-              child: Image.network(
-                url,
+              // Disk-cached: avatars show instantly on relaunch and offline.
+              child: CachedNetworkImage(
+                imageUrl: url,
                 width: size,
                 height: size,
                 fit: BoxFit.cover,
-                cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
-                errorBuilder: (_, _, _) => fallback,
-                loadingBuilder: (context, child, progress) => progress == null ? child : fallback,
+                memCacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
+                fadeInDuration: const Duration(milliseconds: 120),
+                placeholder: (_, _) => fallback,
+                errorWidget: (_, _, _) => fallback,
               ),
             ),
     );

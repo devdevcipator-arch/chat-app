@@ -9,6 +9,8 @@ environment:
 
 dependencies:
   agora_rtc_engine: ^6.6.4
+  cached_network_image: ^4.0.7
+  connectivity_plus: ^7.3.2
   file_picker: ^13.3.3
   flutter:
     sdk: flutter

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
@@ -16,12 +17,11 @@ class ImageViewerScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final Widget image = localPath != null
         ? Image.file(File(localPath!), fit: BoxFit.contain)
-        : Image.network(
-            url!,
+        : CachedNetworkImage(
+            imageUrl: url!,
             fit: BoxFit.contain,
-            loadingBuilder: (context, child, progress) =>
-                progress == null ? child : const Center(child: CircularProgressIndicator()),
-            errorBuilder: (_, _, _) => const Center(
+            placeholder: (_, _) => const Center(child: CircularProgressIndicator()),
+            errorWidget: (_, _, _) => const Center(
               child: Text("Couldn't load the image.", style: TextStyle(color: Colors.white70)),
             ),
           );

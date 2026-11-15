@@ -41,6 +41,15 @@ class Profile {
         theme: ThemePreference.parse(map['theme_preference']),
       );
 
+  /// Inverse of [Profile.fromMap] (used by the local cache).
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'username': username,
+        'display_name': displayName,
+        'avatar_url': avatarUrl,
+        'theme_preference': theme.name,
+      };
+
   Profile copyWith({String? displayName, String? avatarUrl, bool clearAvatar = false, ThemePreference? theme}) =>
       Profile(
         id: id,

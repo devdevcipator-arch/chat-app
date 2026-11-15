@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -240,7 +241,7 @@ class _GalleryItemScreen extends StatelessWidget {
     final Widget preview = url == null
         ? const Text('Preview unavailable', style: TextStyle(color: Colors.white70))
         : switch (item.kind) {
-            'image' => InteractiveViewer(maxScale: 5, child: Image.network(url, fit: BoxFit.contain)),
+            'image' => InteractiveViewer(maxScale: 5, child: CachedNetworkImage(imageUrl: url, fit: BoxFit.contain)),
             'video' => VideoPlayerView(url: url),
             'audio' => Card(child: Padding(padding: const EdgeInsets.all(12), child: AudioPlayerBar(url: url))),
             _ => Column(mainAxisSize: MainAxisSize.min, children: [

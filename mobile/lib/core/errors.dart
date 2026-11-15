@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 const _generic = 'Something went wrong. Please try again.';
@@ -9,11 +11,14 @@ const _serverProblem = 'The server ran into a problem. Please try again shortly.
 
 final _emailSendError = RegExp(r'sending .*email', caseSensitive: false);
 
-bool _looksOffline(Object error) {
+/// Whether [error] means the request never reached the server (no internet,
+/// DNS failure, airplane mode) rather than the server rejecting it.
+bool isOfflineError(Object error) {
   final text = error.toString();
   // Retryable errors also cover 5xx responses; only a missing status code
   // means the request never reached the server.
-  return (error is AuthRetryableFetchException &&
+  return error is TimeoutException ||
+      (error is AuthRetryableFetchException &&
           (error.statusCode == null || error.statusCode == '0')) ||
       text.contains('SocketException') ||
       text.contains('ClientException') ||
@@ -22,7 +27,7 @@ bool _looksOffline(Object error) {
 
 /// User-friendly message for Supabase Auth errors.
 String authErrorMessage(Object error) {
-  if (_looksOffline(error)) return _offline;
+  if (isOfflineError(error)) return _offline;
   if (error is! AuthException) return _generic;
   if (_emailSendError.hasMatch(error.message)) return _emailFailed;
   if (error is AuthRetryableFetchException) return _serverProblem;
@@ -50,7 +55,7 @@ String authErrorMessage(Object error) {
 
 /// User-friendly message for database (PostgREST) errors.
 String dbErrorMessage(Object error) {
-  if (_looksOffline(error)) return _offline;
+  if (isOfflineError(error)) return _offline;
   if (error is PostgrestException) {
     switch (error.code) {
       case '23505':

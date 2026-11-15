@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -18,15 +19,18 @@ import '../core/time_format.dart';
 import '../data/call_repository.dart';
 import '../data/chat_repository.dart';
 import '../data/gallery_repository.dart';
+import '../data/local_cache.dart';
 import '../models/chat_details.dart';
 import '../models/chat_message.dart';
 import '../models/gallery_item.dart';
 import '../models/profile.dart';
 import '../services/call_controller.dart';
+import '../services/network_status.dart';
 import '../widgets/audio_player.dart';
 import '../widgets/avatar.dart';
 import '../widgets/math_result_card.dart';
 import '../widgets/media_views.dart';
+import '../widgets/offline_banner.dart';
 import '../widgets/voice_recorder.dart';
 import 'group_info_screen.dart';
 
@@ -66,7 +70,22 @@ class _PendingUpload {
 
 class _ChatScreenState extends State<ChatScreen> {
   ChatDetails? _details;
-  List<ChatMessage> _messages = const [];
+
+  // Seeded from the local cache so a previously opened chat renders on the
+  // first frame (and stays readable offline); changes are written back.
+  late List<ChatMessage> _messageList = LocalCache.messages(widget.me.id, widget.chatId) ?? const [];
+  List<ChatMessage> get _messages => _messageList;
+  set _messages(List<ChatMessage> messages) {
+    _messageList = messages;
+    _persistDebounce?.cancel();
+    _persistDebounce = Timer(const Duration(milliseconds: 800), _persist);
+  }
+
+  Timer? _persistDebounce;
+  StreamSubscription<void>? _reconnectSub;
+
+  void _persist() => unawaited(LocalCache.saveMessages(widget.me.id, widget.chatId, _messageList));
+
   final _pending = <String, _PendingUpload>{};
   bool _loading = true;
   String? _loadError;
@@ -86,6 +105,14 @@ class _ChatScreenState extends State<ChatScreen> {
     _load();
     _subscribe();
     if (widget.initialIsGroup) _watchGroupCall();
+    _reconnectSub = NetworkStatus.instance.reconnects.listen((_) {
+      if (!mounted) return;
+      if (_details == null || _loadError != null) {
+        unawaited(_load());
+      } else {
+        unawaited(_catchUp());
+      }
+    });
     // Re-evaluate edit windows ("Edit" disappears after 10 minutes).
     _clock = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) setState(() {});
@@ -95,6 +122,11 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _clock?.cancel();
+    _reconnectSub?.cancel();
+    if (_persistDebounce?.isActive ?? false) {
+      _persistDebounce!.cancel();
+      _persist();
+    }
     for (final c in [_channel, _callChannel]) {
       if (c != null) unawaited(supabase.removeChannel(c));
     }
@@ -107,6 +139,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ChatRepository.details(widget.chatId),
         ChatRepository.recentMessages(widget.chatId),
       ]);
+      NetworkStatus.instance.reportSuccess();
       if (!mounted) return;
       final details = results[0] as ChatDetails?;
       if (details == null) {
@@ -123,6 +156,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (details.isGroup && _callChannel == null) _watchGroupCall();
       unawaited(ChatRepository.markRead(widget.chatId));
     } catch (e) {
+      NetworkStatus.instance.reportFailure(e);
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -626,7 +660,8 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ),
         actions: [
-          if (!_connected)
+          // Offline is covered by the banner; this is for Realtime hiccups.
+          if (!_connected && NetworkStatus.instance.isOnline)
             const Padding(
               padding: EdgeInsets.only(right: 4),
               child: Chip(label: Text('Reconnecting…'), visualDensity: VisualDensity.compact),
@@ -651,6 +686,7 @@ class _ChatScreenState extends State<ChatScreen> {
       body: SafeArea(
         child: Column(
           children: [
+            const OfflineBanner(message: 'Offline — showing saved messages'),
             if (_groupCall != null) _GroupCallBanner(call: _groupCall!, meId: _meId, onJoin: () => _call(video: _groupCall!.callType == 'video')),
             Expanded(child: _buildMessages(context, name)),
             if (_recording)
@@ -877,17 +913,23 @@ class _MessageBubble extends StatelessWidget {
         }
         return Text(message.content ?? '', style: TextStyle(color: textColor, fontSize: 15, height: 1.3));
       case 'image':
-        final Widget image = local != null && File(local).existsSync()
-            ? Image.file(File(local), fit: BoxFit.cover)
-            : url != null
-                ? Image.network(
-                    url,
-                    fit: BoxFit.cover,
-                    loadingBuilder: (context, child, p) =>
-                        p == null ? child : const SizedBox(height: 180, child: Center(child: CircularProgressIndicator())),
-                    errorBuilder: (_, _, _) => _unavailable(textColor, Icons.broken_image_outlined, 'Image unavailable'),
-                  )
-                : _unavailable(textColor, Icons.image_outlined, 'Image');
+        // Decode at bubble size, not full resolution, to keep scrolling smooth.
+        final decodeWidth = (260 * MediaQuery.devicePixelRatioOf(context)).round();
+        final Widget remote = url != null
+            ? CachedNetworkImage(
+                imageUrl: url,
+                fit: BoxFit.cover,
+                memCacheWidth: decodeWidth,
+                fadeInDuration: const Duration(milliseconds: 120),
+                placeholder: (_, _) => const SizedBox(height: 180, child: Center(child: CircularProgressIndicator())),
+                errorWidget: (_, _, _) => _unavailable(textColor, Icons.broken_image_outlined, 'Image unavailable'),
+              )
+            : _unavailable(textColor, Icons.image_outlined, 'Image');
+        // Our own just-sent photo: show the local file (no sync disk check
+        // in build; a missing file falls back to the uploaded copy).
+        final Widget image = local != null
+            ? Image.file(File(local), fit: BoxFit.cover, cacheWidth: decodeWidth, errorBuilder: (_, _, _) => remote)
+            : remote;
         return GestureDetector(
           onTap: url == null && local == null
               ? null
@@ -1237,7 +1279,12 @@ class GalleryThumb extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final url = item.url;
     final Widget body = item.kind == 'image' && url != null
-        ? Image.network(url, fit: BoxFit.cover, cacheWidth: 300, errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined))
+        ? CachedNetworkImage(
+            imageUrl: url,
+            fit: BoxFit.cover,
+            memCacheWidth: 300,
+            errorWidget: (_, _, _) => const Icon(Icons.broken_image_outlined),
+          )
         : Padding(
             padding: const EdgeInsets.all(8),
             child: Column(

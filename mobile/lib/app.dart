@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/errors.dart';
 import 'core/theme.dart';
 import 'core/supabase.dart';
+import 'data/local_cache.dart';
 import 'data/profile_repository.dart';
 import 'models/profile.dart';
 import 'screens/call_screen.dart';
@@ -13,6 +14,7 @@ import 'screens/chat_list_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'services/call_controller.dart';
+import 'services/network_status.dart';
 
 final _navigatorKey = GlobalKey<NavigatorState>();
 
@@ -78,6 +80,11 @@ enum _Stage { loading, signedOut, onboarding, ready, error }
 
 /// Mirrors the web route guard: signed out -> login, no username ->
 /// onboarding, otherwise -> chats. Driven by the Supabase auth stream.
+///
+/// Offline-first: a signed-in user with a cached profile goes straight to
+/// Chats on the first frame, and the profile refreshes in the background.
+/// Network failures never sign anyone out; only an explicit sign-out or the
+/// server rejecting the refresh token (a `signedOut` event from gotrue) does.
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
 
@@ -87,11 +94,15 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   late final StreamSubscription<AuthState> _authSub;
+  late final StreamSubscription<void> _reconnectSub;
   _Stage _stage = _Stage.loading;
   Profile? _profile;
   String? _userId;
   String? _error;
   int _generation = 0;
+
+  /// Whether [_profile] came from the server in this generation (vs. cache).
+  bool _profileSynced = false;
 
   @override
   void initState() {
@@ -105,15 +116,21 @@ class _AuthGateState extends State<AuthGate> {
     _authSub = supabase.auth.onAuthStateChange.listen(
       _onAuthState,
       onError: (Object e) {
-        // e.g. an expired refresh token: treat as signed out.
-        if (mounted) _setStage(_Stage.signedOut);
+        // Token refreshes that fail for network reasons land here. The
+        // session is still stored and gotrue keeps retrying; a refresh token
+        // the server rejects arrives as a `signedOut` event instead. So this
+        // must never route to sign-in.
+        debugPrint('Auth stream error (session kept): $e');
+        NetworkStatus.instance.reportFailure(e);
       },
     );
+    _reconnectSub = NetworkStatus.instance.reconnects.listen((_) => _onReconnect());
   }
 
   @override
   void dispose() {
     _authSub.cancel();
+    _reconnectSub.cancel();
     super.dispose();
   }
 
@@ -134,30 +151,86 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
+  /// Back online: finish anything that had to wait for the network.
+  void _onReconnect() {
+    final session = supabase.auth.currentSession;
+    final userId = _userId;
+    if (session == null || userId == null) return;
+    if (session.isExpired) {
+      // A rejected refresh token signs out via the auth stream; anything
+      // else (still flaky network) is reported there and ignored.
+      unawaited(supabase.auth.refreshSession().then((_) {}, onError: (_) {}));
+    }
+    if (_stage == _Stage.error) {
+      _resolve(session);
+    } else if (!_profileSynced) {
+      unawaited(_syncProfile(userId, _generation));
+    }
+  }
+
   Future<void> _resolve(Session? session) async {
     final generation = ++_generation;
-    final userId = session?.user.id;
-    _userId = userId;
+    final user = session?.user;
+    _userId = user?.id;
+    _profileSynced = false;
 
-    if (userId == null) {
+    if (user == null) {
       _profile = null;
       await CallController.instance.detach();
+      await LocalCache.clear();
       _setStage(_Stage.signedOut);
       return;
     }
 
+    unawaited(LocalCache.saveUser(user.id, email: user.email));
+    final cached = LocalCache.profile(user.id);
+    if (cached != null && cached.hasUsername) {
+      // Instant start (also offline): show Chats now, refresh quietly.
+      _profile = cached;
+      _setStage(_Stage.ready);
+      unawaited(_syncProfile(user.id, generation));
+      return;
+    }
+
     if (mounted && _stage != _Stage.loading) _setStage(_Stage.loading);
+    await _syncProfile(user.id, generation, blocking: true);
+  }
+
+  /// Fetches my profile. In the background ([blocking] false) failures keep
+  /// the cached profile; otherwise an offline failure still opens Chats.
+  Future<void> _syncProfile(String userId, int generation, {bool blocking = false}) async {
     try {
-      final profile = await ProfileRepository.fetchMine(userId);
+      final profile = await ProfileRepository.fetchMine(userId).timeout(const Duration(seconds: 20));
+      NetworkStatus.instance.reportSuccess();
       if (!mounted || generation != _generation) return;
       _profile = profile;
+      _profileSynced = true;
+      unawaited(LocalCache.saveProfile(profile));
       ThemeController.instance.applyFromProfile(profile.theme);
-      _setStage(profile.hasUsername ? _Stage.ready : _Stage.onboarding);
+      final stage = profile.hasUsername ? _Stage.ready : _Stage.onboarding;
+      if (stage != _stage) {
+        _setStage(stage);
+      } else {
+        setState(() {}); // hand the fresh profile to the chat list
+      }
     } catch (e) {
-      if (!mounted || generation != _generation) return;
-      _error = dbErrorMessage(e);
-      _setStage(_Stage.error);
+      NetworkStatus.instance.reportFailure(e);
+      if (!mounted || generation != _generation || !blocking) return;
+      if (isOfflineError(e)) {
+        // Signed in, offline, nothing cached yet (e.g. first launch after an
+        // update): open Chats anyway; the profile syncs on reconnect.
+        _profile = Profile(id: userId);
+        _setStage(_Stage.ready);
+      } else {
+        _error = dbErrorMessage(e);
+        _setStage(_Stage.error);
+      }
     }
+  }
+
+  void _onProfileChanged(Profile profile) {
+    _profile = profile;
+    unawaited(LocalCache.saveProfile(profile));
   }
 
   void _setStage(_Stage stage) {
@@ -184,14 +257,15 @@ class _AuthGateState extends State<AuthGate> {
             key: const ValueKey('onboarding'),
             userId: _profile!.id,
             onCompleted: (profile) {
-              _profile = profile;
+              _onProfileChanged(profile);
+              _profileSynced = true;
               _setStage(_Stage.ready);
             },
           ),
         _Stage.ready => ChatListScreen(
             key: ValueKey('chats:${_profile!.id}'),
             me: _profile!,
-            onProfileChanged: (p) => _profile = p,
+            onProfileChanged: _onProfileChanged,
           ),
         _Stage.error => Scaffold(
             key: const ValueKey('error'),

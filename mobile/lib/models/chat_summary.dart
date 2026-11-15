@@ -88,6 +88,29 @@ class ChatSummary {
     );
   }
 
+  /// Inverse of [ChatSummary.fromRow] (used by the local cache).
+  Map<String, dynamic> toRow() => {
+        'chat_id': chatId,
+        'chat_type': type,
+        'chat_created_at': createdAt.toIso8601String(),
+        'title': title,
+        'avatar_url': avatarUrl,
+        'member_count': memberCount,
+        'my_role': isAdmin ? 'admin' : 'member',
+        'is_muted': isMuted,
+        'unread_count': unreadCount,
+        'other_user_id': other?.id,
+        'other_username': other?.username,
+        'other_display_name': other?.displayName,
+        'other_avatar_url': other?.avatarUrl,
+        'last_message_at': lastMessage?.createdAt.toIso8601String(),
+        'last_message_content': lastMessage?.content,
+        'last_message_type': lastMessage?.type,
+        'last_message_sender_id': lastMessage?.senderId,
+        'last_message_sender_name': lastMessage?.senderName,
+        'last_message_duration_seconds': lastMessage?.durationSeconds,
+      };
+
   ChatSummary copyWith({LastMessage? lastMessage, int? unreadCount, bool? isMuted}) => ChatSummary(
         chatId: chatId,
         type: type,
