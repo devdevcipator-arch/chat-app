@@ -28,6 +28,18 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     LocalCache.resetForTest();
     await LocalCache.init();
+    await LocalCache.saveUser('u1');
+  });
+
+  test('after sign-out, late writes (screens flushing on dispose) are dropped', () async {
+    await LocalCache.saveChats('u1', const []);
+    await LocalCache.clear();
+    await LocalCache.saveChats('u1', const []);
+    await LocalCache.saveMessages('u1', 'c1', [_message('m', 0)]);
+    await LocalCache.saveProfile(const Profile(id: 'u1', username: 'alice'));
+    expect(LocalCache.chats('u1'), isNull);
+    expect(LocalCache.messages('u1', 'c1'), isNull);
+    expect(LocalCache.profile('u1'), isNull);
   });
 
   test('profile round-trips through the cache', () async {

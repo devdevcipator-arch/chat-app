@@ -14,6 +14,7 @@ import { UploadError } from "@/lib/media-client";
 import { AVATAR_INPUT_TYPES, DISPLAY_NAME_MAX, asTheme, normalizeDisplayName, type ThemePreference } from "@/lib/profile";
 import { removeAvatar, saveDisplayName, saveThemePreference, uploadAvatar } from "@/lib/profile-client";
 import { createClient } from "@/lib/supabase/client";
+import { signOut } from "@/app/chat/actions";
 
 const errorText = (e: unknown) => (e instanceof UploadError ? e.message : "Something went wrong. Please try again.");
 
@@ -61,6 +62,21 @@ export function ProfileSettings({ me }: { me: Profile & { username: string } }) 
   const [progress, setProgress] = useState<number | null>(null);
   const [removing, setRemoving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
+
+  // --- Sign out --------------------------------------------------------------------
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  async function doSignOut() {
+    setSigningOut(true);
+    try {
+      await signOut(); // clears the session cookie and redirects to /login
+    } catch {
+      setSigningOut(false);
+      setConfirmSignOut(false);
+      push({ tone: "error", text: "Couldn't sign out. Please try again." });
+    }
+  }
   const fileInput = useRef<HTMLInputElement>(null);
   const uploading = progress !== null;
   const avatarBusy = uploading || removing;
@@ -240,6 +256,19 @@ export function ProfileSettings({ me }: { me: Profile & { username: string } }) 
           </div>
         </Section>
 
+        <Section title="Account" description="Sign out of Chat App on this device.">
+          <button
+            type="button"
+            onClick={() => setConfirmSignOut(true)}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 sm:w-auto dark:border-red-900/60 dark:text-red-400 dark:hover:bg-red-950/40"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="size-4">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+            </svg>
+            Sign Out
+          </button>
+        </Section>
+
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-200 bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
           <div className="mx-auto flex max-w-2xl items-center justify-end gap-3 px-4 py-3">
             <p className="mr-auto text-xs text-zinc-500">{dirty ? "You have unsaved changes." : "All changes saved."}</p>
@@ -278,6 +307,17 @@ export function ProfileSettings({ me }: { me: Profile & { username: string } }) 
         busyLabel="Removing…"
         onConfirm={() => void doRemove()}
         onClose={() => !removing && setConfirmRemove(false)}
+      />
+      <ConfirmDialog
+        open={confirmSignOut}
+        title="Sign out of your account?"
+        description="You'll need to sign in again with your email to use Chat App on this device."
+        confirmLabel="Sign Out"
+        danger
+        busy={signingOut}
+        busyLabel="Signing out…"
+        onConfirm={() => void doSignOut()}
+        onClose={() => !signingOut && setConfirmSignOut(false)}
       />
       <Toasts toasts={toasts} onDismiss={dismiss} />
     </div>

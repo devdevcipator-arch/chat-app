@@ -8,6 +8,7 @@ import '../core/api.dart';
 import '../core/errors.dart';
 import '../core/supabase.dart';
 import '../core/theme.dart';
+import '../data/local_cache.dart';
 import '../data/profile_repository.dart';
 import '../models/profile.dart';
 import '../widgets/avatar.dart';
@@ -139,14 +140,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Sign out?'),
+        title: const Text('Sign out of your account?'),
+        content: const Text("You'll need to sign in again with your email to use the app on this device."),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Sign out')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sign out'),
+          ),
         ],
       ),
     );
-    if (ok == true) await supabase.auth.signOut();
+    if (ok != true) return;
+    // Removes the stored Supabase session locally first (works offline too),
+    // then emits `signedOut`: AuthGate hangs up any call, drops every pushed
+    // route (including this one) and shows the Sign-In screen.
+    await supabase.auth.signOut();
+    // Also wipe the offline cache here so nothing of this account survives,
+    // even if the gate is mid-transition.
+    await LocalCache.clear();
   }
 
   @override
@@ -215,7 +228,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 32),
-          OutlinedButton.icon(onPressed: _signOut, icon: const Icon(Icons.logout), label: const Text('Sign out')),
+          Text('Account', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _signOut,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+              side: BorderSide(color: Theme.of(context).colorScheme.error.withValues(alpha: 0.5)),
+              minimumSize: const Size.fromHeight(48),
+              textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            ),
+            icon: const Icon(Icons.logout),
+            label: const Text('Sign Out'),
+          ),
           const SizedBox(height: 24),
           Text(
             'Powered by Devcipator',

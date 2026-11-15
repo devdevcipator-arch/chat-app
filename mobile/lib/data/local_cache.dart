@@ -34,6 +34,13 @@ abstract final class LocalCache {
 
   static SharedPreferences? _prefs;
 
+  /// The signed-in user. Writes for anyone else are dropped, so a screen
+  /// flushing its cache while it is torn down after sign-out cannot
+  /// re-populate what [clear] just removed.
+  static String? _activeUser;
+
+  static bool _isActive(String userId) => userId == _activeUser;
+
   static Future<void> init() async {
     if (_prefs != null) return;
     try {
@@ -44,7 +51,10 @@ abstract final class LocalCache {
   }
 
   @visibleForTesting
-  static void resetForTest() => _prefs = null;
+  static void resetForTest() {
+    _prefs = null;
+    _activeUser = null;
+  }
 
   static String _key(String userId, String name) => '$_prefix.$userId.$name';
 
@@ -74,8 +84,10 @@ abstract final class LocalCache {
     return CachedUser(id: json['id'] as String, email: json['email'] as String?);
   }
 
-  static Future<void> saveUser(String userId, {String? email}) =>
-      _writeJson(_lastUserKey, {'id': userId, 'email': ?email});
+  static Future<void> saveUser(String userId, {String? email}) {
+    _activeUser = userId;
+    return _writeJson(_lastUserKey, {'id': userId, 'email': ?email});
+  }
 
   static Profile? profile(String userId) {
     final json = _readJson(_key(userId, 'profile'));
@@ -88,7 +100,9 @@ abstract final class LocalCache {
     }
   }
 
-  static Future<void> saveProfile(Profile profile) => _writeJson(_key(profile.id, 'profile'), profile.toMap());
+  static Future<void> saveProfile(Profile profile) async {
+    if (_isActive(profile.id)) await _writeJson(_key(profile.id, 'profile'), profile.toMap());
+  }
 
   // --- Chat list ---------------------------------------------------------------
 
@@ -102,8 +116,9 @@ abstract final class LocalCache {
     }
   }
 
-  static Future<void> saveChats(String userId, List<ChatSummary> chats) =>
-      _writeJson(_key(userId, 'chats'), [for (final c in chats) c.toRow()]);
+  static Future<void> saveChats(String userId, List<ChatSummary> chats) async {
+    if (_isActive(userId)) await _writeJson(_key(userId, 'chats'), [for (final c in chats) c.toRow()]);
+  }
 
   // --- Messages ----------------------------------------------------------------
 
@@ -120,6 +135,7 @@ abstract final class LocalCache {
   /// Keeps the newest [maxMessagesPerChat] delivered messages of [chatId];
   /// chats beyond [maxCachedChats] (least recently saved) are evicted.
   static Future<void> saveMessages(String userId, String chatId, List<ChatMessage> messages) async {
+    if (!_isActive(userId)) return;
     final sent = messages.where((m) => m.status == MessageStatus.sent).toList();
     final recent = sent.length > maxMessagesPerChat ? sent.sublist(sent.length - maxMessagesPerChat) : sent;
     await _writeJson(_key(userId, 'messages.$chatId'), [for (final m in recent) m.toMap()]);
@@ -148,6 +164,7 @@ abstract final class LocalCache {
 
   /// Removes every cached entry (all users) and the last-user record.
   static Future<void> clear() async {
+    _activeUser = null;
     final prefs = _prefs;
     if (prefs == null) return;
     try {

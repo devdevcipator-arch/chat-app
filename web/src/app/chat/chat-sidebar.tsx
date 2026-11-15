@@ -24,7 +24,6 @@ import { CallsPanel } from "./calls-panel";
 import { ChatMenu } from "./chat-menu";
 import { NewGroupButton } from "./new-group-dialog";
 import { NotificationPrompt } from "./notification-prompt";
-import { SignOutButton } from "./sign-out-button";
 import { BottomNav, GalleryIcon, NavRail, type SidebarTab, type TabBadges } from "./sidebar-nav";
 import { usePageActive, useUnreadTitle } from "./use-page-attention";
 import { UserSearch } from "./user-search";
@@ -243,19 +242,23 @@ export function ChatSidebar({
   if (syncedChatId !== activeChatId) {
     setSyncedChatId(activeChatId);
     const open = chats.find((c) => c.chatId === activeChatId);
-    if (open && tab !== "calls") setTab(open.type === "group" ? "groups" : "chats");
+    // Chats lists every conversation, so only a direct chat opened from the
+    // Groups tab needs to switch tabs to stay visible.
+    if (open && tab === "groups" && open.type !== "group") setTab("chats");
   }
 
   const [groupFilter, setGroupFilter] = useState("");
-  const directChats = chats.filter((c) => c.type !== "group");
-  const allGroups = chats.filter((c) => c.type === "group");
+  // Chats: every conversation (direct + groups), newest activity first.
+  // Groups: group chats only.
+  const allChats = [...chats].sort((a, b) => lastActivity(b) - lastActivity(a));
+  const allGroups = allChats.filter((c) => c.type === "group");
   const groupQuery = groupFilter.trim().toLowerCase();
   const groupChats = groupQuery
     ? allGroups.filter((c) => chatName(c).toLowerCase().includes(groupQuery))
     : allGroups;
   const unreadOf = (list: ChatSummary[]) =>
     list.reduce((sum, c) => sum + (c.isMuted || c.chatId === activeChatId ? 0 : c.unreadCount), 0);
-  const badges: TabBadges = { chats: unreadOf(directChats), groups: unreadOf(allGroups) };
+  const badges: TabBadges = { chats: unreadOf(allChats), groups: unreadOf(allGroups) };
 
   return (
     <>
@@ -318,7 +321,7 @@ export function ChatSidebar({
             <CallsPanel meId={me.id} chats={chats} />
           ) : (
             <ChatList
-              chats={tab === "groups" ? groupChats : directChats}
+              chats={tab === "groups" ? groupChats : allChats}
               meId={me.id}
               activeChatId={activeChatId}
               empty={
@@ -340,13 +343,17 @@ export function ChatSidebar({
       </div>
 
       <BottomNav active={tab} onChange={setTab} badges={badges} />
-      {/* Mobile footer: the very last thing on the page, under the tab bar. */}
-      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-zinc-200 px-3 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] md:hidden dark:border-zinc-800">
+      {/* Mobile footer: the very last thing on the page, under the tab bar.
+          Sign out lives on the Profile & Settings page on mobile. */}
+      <div className="flex shrink-0 items-center gap-2 border-t border-zinc-200 px-3 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] md:hidden dark:border-zinc-800">
         <PoweredBy />
-        <SignOutButton />
       </div>
     </>
   );
+}
+
+function lastActivity(chat: ChatSummary) {
+  return Date.parse(chat.lastMessage?.createdAt ?? chat.createdAt);
 }
 
 const TAB_TITLES: Record<SidebarTab, string> = { chats: "Chats", groups: "Groups", calls: "Calls" };

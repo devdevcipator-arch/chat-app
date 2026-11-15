@@ -314,20 +314,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
   int _unreadOf(Iterable<ChatSummary> chats) =>
       chats.fold(0, (sum, c) => sum + (c.isMuted || c.chatId == _openChatId ? 0 : c.unreadCount));
 
-  Future<void> _confirmSignOut() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Sign out?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Sign out')),
-        ],
-      ),
-    );
-    if (ok == true) await supabase.auth.signOut();
-  }
-
   Widget _badgeIcon(IconData icon, int count) => Badge(
         isLabelVisible: count > 0,
         label: Text(count > 99 ? '99+' : '$count'),
@@ -338,8 +324,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Widget build(BuildContext context) {
     final me = _me;
     final scheme = Theme.of(context).colorScheme;
-    final direct = _chats.where((c) => !c.isGroup).toList();
-    final allGroups = _chats.where((c) => c.isGroup).toList();
+    // Chats: every conversation (direct + groups), newest activity first.
+    // Groups: group chats only.
+    final all = [..._chats]..sort((a, b) => b.lastActivity.compareTo(a.lastActivity));
+    final allGroups = all.where((c) => c.isGroup).toList();
     final query = _groupFilter.text.trim().toLowerCase();
     final groups = query.isEmpty ? allGroups : allGroups.where((c) => c.name.toLowerCase().contains(query)).toList();
 
@@ -374,7 +362,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   children: [
                     _UserSearch(meId: me.id, onStartChat: _startChat),
                     Expanded(
-                      child: _buildList(context, direct, 'No conversations yet.\nSearch for an @username to start one.'),
+                      child: _buildList(context, all, 'No conversations yet.\nSearch for an @username to start one.'),
                     ),
                   ],
                 ),
@@ -440,8 +428,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
               }),
               destinations: [
                 NavigationDestination(
-                  icon: _badgeIcon(Icons.chat_bubble_outline, _unreadOf(direct)),
-                  selectedIcon: _badgeIcon(Icons.chat_bubble, _unreadOf(direct)),
+                  icon: _badgeIcon(Icons.chat_bubble_outline, _unreadOf(all)),
+                  selectedIcon: _badgeIcon(Icons.chat_bubble, _unreadOf(all)),
                   label: 'Chats',
                 ),
                 NavigationDestination(
@@ -460,24 +448,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
               top: false,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: [
-                    const Expanded(child: _PoweredBy()),
-                    TextButton.icon(
-                      onPressed: _confirmSignOut,
-                      style: TextButton.styleFrom(
-                        foregroundColor: scheme.onSurfaceVariant,
-                        visualDensity: VisualDensity.compact,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        minimumSize: const Size(0, 32),
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-                      ),
-                      icon: const Icon(Icons.logout, size: 16),
-                      label: const Text('Sign out'),
-                    ),
-                  ],
-                ),
+                // Sign out lives in Profile & Settings.
+                child: const _PoweredBy(),
               ),
             ),
           ),
