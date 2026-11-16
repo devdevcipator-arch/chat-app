@@ -38,6 +38,10 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Pinned to the version the project is built and tested with locally.
+          # Newer Flutter releases can raise the minimum Android Gradle Plugin
+          # version and break the build; bump this together with AGP.
+          flutter-version: 3.47.9
           cache: true
 
       - name: Write env.json from secrets
@@ -71,7 +75,7 @@ jobs:
             echo "::error::ANDROID_KEYSTORE_BASE64 secret is missing; refusing to publish a debug-signed APK."
             exit 1
           fi
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/upload-keystore.jks
           {
             echo "storePassword=$ANDROID_STORE_PASSWORD"
             echo "keyPassword=$ANDROID_KEY_PASSWORD"
