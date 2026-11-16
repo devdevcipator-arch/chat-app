@@ -13,6 +13,10 @@ const OTP_LENGTH = 6;
 const RESEND_SECONDS = 60;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Always the newest CI build (.github/workflows/release-android-apk.yml).
+const ANDROID_APK_URL =
+  "https://github.com/devdevcipator-arch/chat-app/releases/latest/download/chat-app.apk";
+
 type Step = "email" | "code";
 
 export function LoginForm() {
@@ -146,6 +150,13 @@ export function LoginForm() {
               Your email is only used to sign you in. Other people see your
               @username, never your email.
             </p>
+
+            <a
+              href={ANDROID_APK_URL}
+              className="mt-4 inline-block text-xs font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400"
+            >
+              Download the Android app
+            </a>
           </motion.form>
         ) : (
           <motion.div

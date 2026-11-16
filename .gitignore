@@ -10,3 +10,8 @@ Thumbs.db
 *.log
 .idea/
 .vscode/
+
+# Android signing (never commit)
+*.jks
+*.keystore
+key.properties
