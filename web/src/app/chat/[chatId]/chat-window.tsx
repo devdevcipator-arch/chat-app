@@ -487,7 +487,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
 
   return (
     <section className="flex min-w-0 flex-1 flex-col" aria-label={`Conversation with ${name}`}>
-      <header className="flex h-16 shrink-0 items-center gap-3 border-b border-zinc-200 px-3 md:px-4 dark:border-zinc-800">
+      <header className="box-content flex h-14 shrink-0 items-center gap-2 border-b border-zinc-200 px-2 pt-[env(safe-area-inset-top)] sm:h-16 sm:gap-3 sm:px-3 md:px-4 dark:border-zinc-800">
         <Link
           href="/chat"
           aria-label="Back to chats"
@@ -1208,7 +1208,7 @@ function Composer({
         )}
       </AnimatePresence>
 
-      <form onSubmit={submit} className="flex items-end gap-2 p-3">
+      <form onSubmit={submit} className="flex items-end gap-1.5 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:gap-2 sm:p-3 sm:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         {!editing && <AttachMenu onFiles={(files) => files.forEach(onAttach)} onOpenGallery={onOpenGallery} />}
         <textarea
           ref={input}
@@ -1220,7 +1220,7 @@ function Composer({
           placeholder={editing ? "Edit message" : showStaged ? "Add a caption…" : "Message"}
           aria-label={editing ? "Edit message" : showStaged ? "Caption" : "Message"}
           autoFocus
-          className="max-h-40 min-h-10 flex-1 resize-none rounded-2xl border border-zinc-300 bg-white px-4 py-2 text-[15px] outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-900"
+          className="max-h-40 min-h-10 flex-1 resize-none rounded-2xl border border-zinc-300 bg-white px-3.5 py-2 text-base outline-none sm:px-4 md:text-[15px] transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-900"
         />
         {!editing && !showStaged && (
           <button

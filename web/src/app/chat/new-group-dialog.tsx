@@ -80,7 +80,7 @@ function NewGroupForm({
           required
           autoFocus
           placeholder="e.g. Weekend plans"
-          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-base outline-none md:text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-950"
         />
       </label>
 

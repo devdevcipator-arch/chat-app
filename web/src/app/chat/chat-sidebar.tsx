@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Avatar } from "@/components/avatar";
-import { PoweredBy } from "@/components/powered-by";
 import { ThemeSync } from "@/components/theme";
 import type { Profile } from "@/lib/auth";
 import { markRead } from "@/lib/chat-actions";
@@ -281,7 +280,7 @@ export function ChatSidebar({
       />
 
       <div className="flex min-h-0 w-full flex-1 flex-col md:w-80 md:flex-none">
-        <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
+        <div className="flex items-center justify-between gap-2 px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-2 sm:px-4 sm:pt-[max(1rem,env(safe-area-inset-top))] sm:pb-3">
           <h1 className="text-lg font-semibold tracking-tight">{TAB_TITLES[tab]}</h1>
           <div className="flex items-center gap-0.5">
             {tab === "groups" && (
@@ -325,7 +324,7 @@ export function ChatSidebar({
         )}
         {tab !== "calls" && <NotificationPrompt />}
 
-        <div className="mt-3 min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain sm:mt-3">
           {tab === "calls" ? (
             <CallsPanel meId={me.id} chats={chats} />
           ) : tab === "chats" && chatSearch ? (
@@ -375,18 +374,10 @@ export function ChatSidebar({
         </div>
 
         <ThemeSync preference={me.themePreference} />
-        {/* Desktop footer; sign out is in the rail there. */}
-        <div className="hidden px-3 pb-2 md:block">
-          <PoweredBy />
-        </div>
       </div>
 
+      {/* Sign out lives on the Profile & Settings page on mobile. */}
       <BottomNav active={tab} onChange={selectTab} badges={badges} />
-      {/* Mobile footer: the very last thing on the page, under the tab bar.
-          Sign out lives on the Profile & Settings page on mobile. */}
-      <div className="flex shrink-0 items-center gap-2 border-t border-zinc-200 px-3 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] md:hidden dark:border-zinc-800">
-        <PoweredBy />
-      </div>
     </>
   );
 }
@@ -422,7 +413,7 @@ function SearchBox({
           autoComplete="off"
           autoCapitalize="none"
           spellCheck={false}
-          className="w-full rounded-lg border border-zinc-200 bg-white py-2 pr-3 pl-9 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-900"
+          className="w-full rounded-lg border border-zinc-200 bg-white py-2 pr-3 pl-9 text-base outline-none md:text-sm transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-900"
         />
       </div>
     </div>

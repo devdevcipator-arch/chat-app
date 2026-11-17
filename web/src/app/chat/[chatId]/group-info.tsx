@@ -338,7 +338,7 @@ function RenameForm({
         maxLength={GROUP_TITLE_MAX}
         aria-label="Group name"
         autoFocus
-        className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-center text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-900"
+        className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-center text-base outline-none md:text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-900"
       />
       <div className="flex justify-center gap-2">
         <button type="button" onClick={onCancel} className="rounded-lg px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">

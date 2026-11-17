@@ -6,9 +6,9 @@ import { avatarPublicUrl } from "@/lib/profile";
 const sizes = {
   xs: "size-5 text-[9px]",
   sm: "size-9 text-xs",
-  md: "size-10 text-sm",
-  lg: "size-14 text-lg",
-  xl: "size-28 text-4xl",
+  md: "size-9 text-xs sm:size-10 sm:text-sm",
+  lg: "size-12 text-base sm:size-14 sm:text-lg",
+  xl: "size-24 text-3xl sm:size-28 sm:text-4xl",
 } as const;
 
 // A profile photo (an R2 avatar key) or coloured initials. Groups get their

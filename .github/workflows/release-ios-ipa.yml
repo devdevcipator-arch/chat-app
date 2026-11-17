@@ -1,0 +1,106 @@
+name: Release iOS IPA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/release-ios-ipa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write # upload release assets
+
+concurrency:
+  group: release-ios-ipa
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          # Same version as the Android workflow and local development.
+          flutter-version: 3.47.9
+          cache: true
+
+      - name: Write env.json from secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          R2_PUBLIC_BASE: ${{ secrets.R2_PUBLIC_BASE }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "::error::SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY secrets are required."
+            exit 1
+          fi
+          # API_BASE_URL falls back to the app's built-in default when unset.
+          jq -n \
+            --arg url "$SUPABASE_URL" \
+            --arg key "$SUPABASE_PUBLISHABLE_KEY" \
+            --arg api "${API_BASE_URL:-https://chat.devcipator.com}" \
+            --arg r2 "$R2_PUBLIC_BASE" \
+            '{SUPABASE_URL: $url, SUPABASE_PUBLISHABLE_KEY: $key, API_BASE_URL: $api, R2_PUBLIC_BASE: $r2}' \
+            > env.json
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: Build iOS app (unsigned)
+        run: flutter build ios --release --no-codesign --dart-define-from-file=env.json --build-number=${{ github.run_number }}
+
+      - name: Package chat-app.ipa
+        run: |
+          rm -rf "$RUNNER_TEMP/ipa" && mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R build/ios/iphoneos/Runner.app "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/chat-app.ipa" Payload)
+          ls -lh "$GITHUB_WORKSPACE/chat-app.ipa"
+
+      # The Android workflow creates the release for this commit (its tag uses
+      # its own run number). Attach the IPA to that same release so the APK
+      # and IPA ship together; wait for it if Android is still building.
+      - name: Find release for this commit
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=""
+          for attempt in $(seq 1 60); do
+            tag=$(gh api "repos/${{ github.repository }}/releases?per_page=30" \
+              --jq '[.[] | select(.target_commitish == "${{ github.sha }}" and .draft == false)][0].tag_name // empty')
+            [ -n "$tag" ] && break
+            echo "No release for ${{ github.sha }} yet (attempt $attempt/60); waiting 30s…"
+            sleep 30
+          done
+          if [ -z "$tag" ]; then
+            tag=$(gh api "repos/${{ github.repository }}/releases/latest" --jq '.tag_name // empty' || true)
+            echo "::warning::No release for this commit; attaching the IPA to the latest release ($tag)."
+          fi
+          if [ -z "$tag" ]; then
+            echo "::error::No GitHub Release exists to attach the IPA to."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Upload IPA to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          make_latest: true
+          files: chat-app.ipa
+
+      - name: Clean up
+        if: always()
+        run: rm -f env.json

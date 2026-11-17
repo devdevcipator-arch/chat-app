@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../core/api.dart';
 import '../core/ids.dart';
 import '../core/media.dart';
+import '../core/responsive.dart';
 import '../core/supabase.dart';
 import '../data/chat_repository.dart';
 import '../services/call_controller.dart';
@@ -124,20 +125,20 @@ class _CallScreenState extends State<CallScreen> {
         SafeArea(
           child: Column(
             children: [
-              const SizedBox(height: 32),
+              SizedBox(height: context.compact(32)),
               if (!showVideo || c.remotes.isEmpty) ...[
                 Avatar(
                   name: c.title,
                   imageUrl: c.isGroup ? null : c.peer?.avatarImageUrl,
                   group: c.isGroup,
-                  size: 112,
+                  size: context.compact(112),
                 ),
-                const SizedBox(height: 20),
+                SizedBox(height: context.compact(20)),
               ],
               Text(
                 c.title,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w600),
+                style: TextStyle(color: Colors.white, fontSize: context.compact(26), fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 6),
               Text(_status(), style: const TextStyle(color: Colors.white70, fontSize: 15)),
@@ -215,8 +216,8 @@ class _CallScreenState extends State<CallScreen> {
         Positioned(
           right: 16,
           bottom: 140,
-          width: 110,
-          height: 160,
+          width: context.compact(110),
+          height: context.compact(160),
           child: ClipRRect(borderRadius: BorderRadius.circular(12), child: local),
         ),
       ]);

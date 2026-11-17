@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../core/errors.dart';
+import '../core/responsive.dart';
 import '../core/supabase.dart';
 import '../core/time_format.dart';
 import '../core/username.dart';
@@ -332,7 +332,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Widget _searchField(TextEditingController controller, String hint) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      padding: EdgeInsets.fromLTRB(context.compact(12), 4, context.compact(12), context.compact(8)),
       child: TextField(
         controller: controller,
         onChanged: (_) => setState(() {}),
@@ -408,7 +408,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   Widget build(BuildContext context) {
     final me = _me;
-    final scheme = Theme.of(context).colorScheme;
     // Chats: every conversation (direct + groups), newest activity first.
     // Groups: group chats only.
     final all = [..._chats]..sort((a, b) => b.lastActivity.compareTo(a.lastActivity));
@@ -427,7 +426,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           IconButton(
             tooltip: 'Settings',
             onPressed: _openSettings,
-            icon: Avatar(name: me.name, imageUrl: me.avatarImageUrl, size: 32),
+            icon: Avatar(name: me.name, imageUrl: me.avatarImageUrl, size: context.compact(32)),
           ),
           const SizedBox(width: 8),
         ],
@@ -483,60 +482,42 @@ class _ChatListScreenState extends State<ChatListScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // The footer below handles the bottom safe area. `context` is from
-          // outside the Scaffold, so the status-bar inset must be removed here
-          // too, or NavigationBar's SafeArea pads the top of the bar with it.
-          MediaQuery.removePadding(
-            context: context,
-            removeTop: true,
-            removeBottom: true,
-            child: NavigationBar(
-              // Default is 80; keep it tight so the bar plus footer don't eat the screen.
-              height: 60,
-              labelPadding: const EdgeInsets.only(top: 2),
-              selectedIndex: _tab,
-              onDestinationSelected: (i) => setState(() {
-                _tab = i;
-                if (i == 2) {
-                  _callsVisited = true;
-                  MissedCalls.instance.markSeen(); // opening Calls clears its badge
-                }
-              }),
-              destinations: [
-                NavigationDestination(
-                  icon: _badgeIcon(Icons.chat_bubble_outline, _unreadOf(all)),
-                  selectedIcon: _badgeIcon(Icons.chat_bubble, _unreadOf(all)),
-                  label: 'Chats',
-                ),
-                NavigationDestination(
-                  icon: _badgeIcon(Icons.group_outlined, _unreadOf(allGroups)),
-                  selectedIcon: _badgeIcon(Icons.group, _unreadOf(allGroups)),
-                  label: 'Groups',
-                ),
-                NavigationDestination(
-                  icon: _badgeIcon(Icons.call_outlined, missedCalls),
-                  selectedIcon: _badgeIcon(Icons.call, missedCalls),
-                  label: 'Calls',
-                ),
-              ],
+      // `context` is from outside the Scaffold, so the status-bar inset must be
+      // removed here, or NavigationBar's SafeArea pads the top of the bar with
+      // it. The bottom inset stays: NavigationBar keeps clear of the home bar.
+      bottomNavigationBar: MediaQuery.removePadding(
+        context: context,
+        removeTop: true,
+        child: NavigationBar(
+          // Default is 80; keep it tight so the bar doesn't eat the screen.
+          height: context.compact(60),
+          labelPadding: const EdgeInsets.only(top: 2),
+          selectedIndex: _tab,
+          onDestinationSelected: (i) => setState(() {
+            _tab = i;
+            if (i == 2) {
+              _callsVisited = true;
+              MissedCalls.instance.markSeen(); // opening Calls clears its badge
+            }
+          }),
+          destinations: [
+            NavigationDestination(
+              icon: _badgeIcon(Icons.chat_bubble_outline, _unreadOf(all)),
+              selectedIcon: _badgeIcon(Icons.chat_bubble, _unreadOf(all)),
+              label: 'Chats',
             ),
-          ),
-          // Footer: the very last thing on the screen, under the tab bar.
-          DecoratedBox(
-            decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant))),
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                // Sign out lives in Profile & Settings.
-                child: const _PoweredBy(),
-              ),
+            NavigationDestination(
+              icon: _badgeIcon(Icons.group_outlined, _unreadOf(allGroups)),
+              selectedIcon: _badgeIcon(Icons.group, _unreadOf(allGroups)),
+              label: 'Groups',
             ),
-          ),
-        ],
+            NavigationDestination(
+              icon: _badgeIcon(Icons.call_outlined, missedCalls),
+              selectedIcon: _badgeIcon(Icons.call, missedCalls),
+              label: 'Calls',
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -589,36 +570,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 }
 
-/// "Powered by Devcipator", linking to the company site (as on the web).
-class _PoweredBy extends StatelessWidget {
-  const _PoweredBy();
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(6),
-        onTap: () => launchUrl(Uri.parse('https://www.devcipator.com/'), mode: LaunchMode.externalApplication),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-          child: Text.rich(
-            TextSpan(children: [
-              const TextSpan(text: 'Powered by '),
-              TextSpan(
-                text: 'Devcipator',
-                style: TextStyle(fontWeight: FontWeight.w600, color: scheme.onSurface.withValues(alpha: 0.8)),
-              ),
-            ]),
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _ChatTile extends StatelessWidget {
   const _ChatTile({super.key, required this.chat, required this.meId, required this.onTap, required this.onLongPress});
 
@@ -654,7 +605,7 @@ class _ChatTile extends StatelessWidget {
         name: chat.name,
         imageUrl: chat.isGroup ? null : chat.other?.avatarImageUrl,
         group: chat.isGroup,
-        size: 44,
+        size: context.compact(44),
       ),
       title: Row(
         children: [

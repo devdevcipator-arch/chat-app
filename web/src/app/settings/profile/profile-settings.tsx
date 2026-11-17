@@ -6,7 +6,6 @@ import { useTheme } from "next-themes";
 import { useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { BackIcon } from "@/app/gallery/icons";
 import { Avatar } from "@/components/avatar";
-import { PoweredBy } from "@/components/powered-by";
 import { ConfirmDialog } from "@/components/dialog";
 import { Toasts, useToasts } from "@/components/toasts";
 import type { Profile } from "@/lib/auth";
@@ -138,8 +137,8 @@ export function ProfileSettings({ me }: { me: Profile & { username: string } }) 
 
   return (
     <div className="min-h-dvh bg-zinc-50 dark:bg-zinc-950">
-      <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/85 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
-        <div className="mx-auto flex h-16 max-w-2xl items-center gap-3 px-4">
+      <header className="sticky top-0 z-20 border-b pt-[env(safe-area-inset-top)] border-zinc-200 bg-white/85 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
+        <div className="mx-auto flex h-14 max-w-2xl items-center gap-2 px-3 sm:h-16 sm:gap-3 sm:px-4">
           <Link
             href="/chat"
             className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
@@ -153,7 +152,7 @@ export function ProfileSettings({ me }: { me: Profile & { username: string } }) 
         </div>
       </header>
 
-      <form onSubmit={save} className="mx-auto max-w-2xl space-y-6 px-4 py-6 pb-28">
+      <form onSubmit={save} className="mx-auto max-w-2xl space-y-5 px-3 py-4 pb-[calc(7rem+env(safe-area-inset-bottom))] sm:space-y-6 sm:px-4 sm:py-6">
         <Section title="Profile" description="How you appear to people you chat with.">
           <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-center">
             <button
@@ -241,7 +240,7 @@ export function ProfileSettings({ me }: { me: Profile & { username: string } }) 
                 maxLength={DISPLAY_NAME_MAX + 20 /* room for whitespace that gets collapsed */}
                 placeholder={`e.g. Amjad Khan (empty shows @${me.username})`}
                 autoComplete="name"
-                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-base outline-none transition md:text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-950"
               />
               <p className="mt-1.5 text-xs text-zinc-500">Extra spaces are removed. Leave it empty to show your @username.</p>
             </div>
@@ -269,8 +268,8 @@ export function ProfileSettings({ me }: { me: Profile & { username: string } }) 
           </button>
         </Section>
 
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-200 bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
-          <div className="mx-auto flex max-w-2xl items-center justify-end gap-3 px-4 py-3">
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-200 bg-white/90 pb-[env(safe-area-inset-bottom)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
+          <div className="mx-auto flex max-w-2xl items-center justify-end gap-3 px-3 py-3 sm:px-4">
             <p className="mr-auto text-xs text-zinc-500">{dirty ? "You have unsaved changes." : "All changes saved."}</p>
             {dirty && (
               <button
@@ -294,8 +293,6 @@ export function ProfileSettings({ me }: { me: Profile & { username: string } }) 
           </div>
         </div>
       </form>
-
-      <PoweredBy className="pb-8" />
 
       <ConfirmDialog
         open={confirmRemove}

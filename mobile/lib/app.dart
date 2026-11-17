@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/errors.dart';
+import 'core/responsive.dart';
 import 'core/theme.dart';
 import 'core/supabase.dart';
 import 'data/local_cache.dart';
@@ -71,6 +72,7 @@ class _ChatAppState extends State<ChatApp> {
         theme: buildTheme(Brightness.light),
         darkTheme: buildTheme(Brightness.dark),
         themeMode: theme.mode,
+        builder: (context, child) => CompactScope(child: child ?? const SizedBox.shrink()),
         home: const AuthGate(),
       ),
     );

@@ -2,20 +2,18 @@
 
 import { motion } from "motion/react";
 import type { ReactNode } from "react";
-import { PoweredBy } from "./powered-by";
 
 export function AuthCard({ children }: { children: ReactNode }) {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center px-4 py-12">
+    <main className="flex flex-1 flex-col items-center justify-center px-4 py-8 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))] sm:py-12">
       <motion.div
         initial={{ opacity: 0, y: 16, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.35, ease: "easeOut" }}
-        className="w-full max-w-sm overflow-hidden rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8 dark:border-white/10 dark:bg-zinc-900/80 dark:backdrop-blur"
+        className="w-full max-w-sm overflow-hidden rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-8 dark:border-white/10 dark:bg-zinc-900/80 dark:backdrop-blur"
       >
         {children}
       </motion.div>
-      <PoweredBy className="mt-6" />
     </main>
   );
 }

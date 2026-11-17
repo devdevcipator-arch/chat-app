@@ -106,6 +106,9 @@ jobs:
             Permanent download link (always the newest build):
             https://github.com/${{ github.repository }}/releases/latest/download/chat-app.apk
 
+            The unsigned iOS build (chat-app.ipa) is attached by the iOS workflow when it finishes:
+            https://github.com/${{ github.repository }}/releases/latest/download/chat-app.ipa
+
       - name: Clean up signing material
         if: always()
         run: rm -f android/app/upload-keystore.jks android/key.properties env.json

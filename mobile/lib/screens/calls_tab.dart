@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/media.dart';
+import '../core/responsive.dart';
 import '../core/supabase.dart';
 import '../core/time_format.dart';
 import '../models/chat_summary.dart';
@@ -245,7 +246,7 @@ class _CallsTabState extends State<CallsTab> {
                     name: name,
                     imageUrl: log.isGroup ? null : log.peer?.avatarImageUrl,
                     group: log.isGroup,
-                    size: 44,
+                    size: context.compact(44),
                   ),
                   title: Text(
                     name,

@@ -54,10 +54,32 @@
   --color-zinc-950: #0a0a0a;
 }
 
+html {
+  /* Stop iOS inflating text after rotation. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
+  /* Nothing may push the page sideways on narrow phones (iPhone SE: 375px). */
+  overflow-x: clip;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* iOS Safari zooms the page when a focused field's text is under 16px.
+   Components set `text-base md:text-sm` explicitly; this is the fallback for
+   any field that doesn't. It sits in the base layer, so utilities still win. */
+@layer base {
+  @media (max-width: 767px) {
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]),
+    textarea,
+    select {
+      font-size: 16px;
+    }
+  }
 }
 
 /* High-tech canvas: faint gridlines under a soft orange glow, visible

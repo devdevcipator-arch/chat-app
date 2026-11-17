@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/config.dart';
+import '../core/responsive.dart';
 import '../data/chat_repository.dart';
 import '../models/chat_details.dart';
 import '../models/profile.dart';
@@ -194,7 +195,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
               child: ListView(
                 children: [
                   const SizedBox(height: 24),
-                  Center(child: Avatar(name: details.name(widget.me.id), group: true, size: 88)),
+                  Center(child: Avatar(name: details.name(widget.me.id), group: true, size: context.compact(88))),
                   const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,

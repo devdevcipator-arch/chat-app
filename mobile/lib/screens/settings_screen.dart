@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../core/api.dart';
 import '../core/errors.dart';
+import '../core/responsive.dart';
 import '../core/supabase.dart';
 import '../core/theme.dart';
 import '../data/local_cache.dart';
@@ -105,8 +106,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (context) => SafeArea(
         child: Wrap(
           children: [
-            ListTile(leading: const Icon(Icons.photo_library_outlined), title: const Text('Choose photo'), onTap: () => Navigator.pop(context, 'gallery')),
-            ListTile(leading: const Icon(Icons.photo_camera_outlined), title: const Text('Take photo'), onTap: () => Navigator.pop(context, 'camera')),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose photo'),
+              onTap: () => Navigator.pop(context, 'gallery'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take photo'),
+              onTap: () => Navigator.pop(context, 'camera'),
+            ),
             if (_me.avatarUrl != null)
               ListTile(
                 leading: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.error),
@@ -167,87 +176,95 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final email = supabase.auth.currentUser?.email;
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Center(
-            child: Stack(
-              children: [
-                InkWell(
-                  customBorder: const CircleBorder(),
-                  onTap: _photoBusy ? null : _photoMenu,
-                  child: Avatar(name: _me.name, imageUrl: _me.avatarImageUrl, size: 104),
-                ),
-                if (_photoBusy)
-                  const Positioned.fill(child: Center(child: CircularProgressIndicator())),
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: IconButton.filled(
-                    tooltip: 'Change photo',
-                    onPressed: _photoBusy ? null : _photoMenu,
-                    icon: const Icon(Icons.photo_camera, size: 18),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: EdgeInsets.all(context.compact(16)),
+          children: [
+            Center(
+              child: Stack(
+                children: [
+                  InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: _photoBusy ? null : _photoMenu,
+                    child: Avatar(name: _me.name, imageUrl: _me.avatarImageUrl, size: context.compact(104)),
                   ),
-                ),
-              ],
+                  if (_photoBusy) const Positioned.fill(child: Center(child: CircularProgressIndicator())),
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: IconButton.filled(
+                      tooltip: 'Change photo',
+                      onPressed: _photoBusy ? null : _photoMenu,
+                      icon: const Icon(Icons.photo_camera, size: 18),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text('@${_me.username}', textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium),
-          if (email != null) Text(email, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
-          const SizedBox(height: 24),
-          Text('Profile', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _name,
-            maxLength: ProfileRepository.displayNameMax,
-            textCapitalization: TextCapitalization.words,
-            onSubmitted: (_) => _saveName(),
-            decoration: InputDecoration(
-              labelText: 'Display name',
-              helperText: 'Leave empty to show your @username.',
-              errorText: _nameError,
-              suffixIcon: _savingName
-                  ? const Padding(padding: EdgeInsets.all(12), child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)))
-                  : IconButton(tooltip: 'Save', onPressed: _saveName, icon: const Icon(Icons.check)),
+            const SizedBox(height: 8),
+            Text('@${_me.username}', textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium),
+            if (email != null) Text(email, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 24),
+            Text('Profile', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _name,
+              maxLength: ProfileRepository.displayNameMax,
+              textCapitalization: TextCapitalization.words,
+              onSubmitted: (_) => _saveName(),
+              decoration: InputDecoration(
+                labelText: 'Display name',
+                helperText: 'Leave empty to show your @username.',
+                errorText: _nameError,
+                suffixIcon: _savingName
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                      )
+                    : IconButton(tooltip: 'Save', onPressed: _saveName, icon: const Icon(Icons.check)),
+              ),
             ),
-          ),
-          const SizedBox(height: 24),
-          Text('Appearance', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          ValueListenableBuilder<ThemePreference>(
-            valueListenable: ThemeController.instance,
-            builder: (context, theme, _) => SegmentedButton<ThemePreference>(
-              segments: const [
-                ButtonSegment(value: ThemePreference.light, icon: Icon(Icons.light_mode_outlined), label: Text('Light')),
-                ButtonSegment(value: ThemePreference.dark, icon: Icon(Icons.dark_mode_outlined), label: Text('Dark')),
-                ButtonSegment(value: ThemePreference.system, icon: Icon(Icons.brightness_auto_outlined), label: Text('System')),
-              ],
-              selected: {theme},
-              onSelectionChanged: (s) => _setTheme(s.first),
+            const SizedBox(height: 24),
+            Text('Appearance', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            ValueListenableBuilder<ThemePreference>(
+              valueListenable: ThemeController.instance,
+              builder: (context, theme, _) => SegmentedButton<ThemePreference>(
+                segments: const [
+                  ButtonSegment(
+                    value: ThemePreference.light,
+                    icon: Icon(Icons.light_mode_outlined),
+                    label: Text('Light'),
+                  ),
+                  ButtonSegment(value: ThemePreference.dark, icon: Icon(Icons.dark_mode_outlined), label: Text('Dark')),
+                  ButtonSegment(
+                    value: ThemePreference.system,
+                    icon: Icon(Icons.brightness_auto_outlined),
+                    label: Text('System'),
+                  ),
+                ],
+                selected: {theme},
+                onSelectionChanged: (s) => _setTheme(s.first),
+              ),
             ),
-          ),
-          const SizedBox(height: 32),
-          Text('Account', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _signOut,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.error,
-              side: BorderSide(color: Theme.of(context).colorScheme.error.withValues(alpha: 0.5)),
-              minimumSize: const Size.fromHeight(48),
-              textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            const SizedBox(height: 32),
+            Text('Account', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _signOut,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+                side: BorderSide(color: Theme.of(context).colorScheme.error.withValues(alpha: 0.5)),
+                minimumSize: const Size.fromHeight(48),
+                textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+              icon: const Icon(Icons.logout),
+              label: const Text('Sign Out'),
             ),
-            icon: const Icon(Icons.logout),
-            label: const Text('Sign Out'),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'Powered by Devcipator',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
-        ],
+            const SizedBox(height: 24),
+          ],
+        ),
       ),
     );
   }

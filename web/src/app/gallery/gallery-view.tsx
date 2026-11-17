@@ -175,8 +175,8 @@ export function GalleryView({
       onDrop={onDrop}
       className="relative min-h-dvh bg-white dark:bg-zinc-950"
     >
-      <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/85 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
-        <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4">
+      <header className="sticky top-0 z-20 border-b pt-[env(safe-area-inset-top)] border-zinc-200 bg-white/85 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
+        <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-3 sm:h-16 sm:gap-3 sm:px-4">
           <Link
             href="/chat"
             className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
@@ -203,7 +203,7 @@ export function GalleryView({
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-5">
+      <main className="mx-auto max-w-6xl px-3 py-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-5">
         <DropZone onBrowse={openPicker} compact={items.length > 0 || uploads.length > 0} />
 
         {uploads.length > 0 && (

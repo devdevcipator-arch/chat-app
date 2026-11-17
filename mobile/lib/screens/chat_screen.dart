@@ -14,6 +14,7 @@ import '../core/errors.dart';
 import '../core/ids.dart';
 import '../core/math_evaluator.dart';
 import '../core/media.dart';
+import '../core/responsive.dart';
 import '../core/supabase.dart';
 import '../core/time_format.dart';
 import '../data/call_repository.dart';
@@ -646,9 +647,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 name: name.isEmpty ? '?' : name,
                 imageUrl: _isGroup ? null : other?.avatarImageUrl,
                 group: _isGroup,
-                size: 36,
+                size: context.compact(36),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: context.compact(12)),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -755,7 +756,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // reverse: true keeps the list anchored to the newest message.
     return ListView.builder(
       reverse: true,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      padding: EdgeInsets.symmetric(horizontal: context.compact(12), vertical: context.compact(12)),
       itemCount: _messages.length,
       itemBuilder: (context, i) {
         final index = _messages.length - 1 - i;
@@ -1084,7 +1085,7 @@ class _FileTile extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: SizedBox(
-          width: 240,
+          width: context.compact(240),
           child: Row(
             children: [
               Container(
@@ -1305,7 +1306,7 @@ class _ComposerState extends State<_Composer> {
             alignment: Alignment.bottomCenter,
             child: mathBar ?? const SizedBox(width: double.infinity),
           ),
-          Padding(padding: const EdgeInsets.fromLTRB(4, 8, 8, 8), child: _inputRow(scheme, empty)),
+          Padding(padding: EdgeInsets.fromLTRB(4, context.compact(8), context.compact(8), context.compact(8)), child: _inputRow(scheme, empty)),
         ],
       ),
     );
@@ -1332,7 +1333,7 @@ class _ComposerState extends State<_Composer> {
                 isDense: true,
                 filled: true,
                 fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                contentPadding: EdgeInsets.symmetric(horizontal: context.compact(16), vertical: 10),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: BorderSide.none),
               ),
             ),

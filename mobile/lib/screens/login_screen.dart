@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/config.dart';
 import '../core/errors.dart';
+import '../core/responsive.dart';
 import '../core/supabase.dart';
 import '../widgets/form_widgets.dart';
 import '../widgets/otp_field.dart';
@@ -137,7 +138,7 @@ class _LoginScreenState extends State<LoginScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: EdgeInsets.all(context.compact(24)),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
               child: AnimatedSwitcher(
