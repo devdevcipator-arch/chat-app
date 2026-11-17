@@ -57,6 +57,9 @@ jobs:
             '{SUPABASE_URL: $url, SUPABASE_PUBLISHABLE_KEY: $key, API_BASE_URL: $api, R2_PUBLIC_BASE: $r2}' \
             > env.json
 
+      - name: Show Xcode version
+        run: xcodebuild -version && xcrun swift --version
+
       - name: flutter pub get
         run: flutter pub get
 

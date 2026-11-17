@@ -32,3 +32,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+dependency_overrides:
+  # 2.12.2+ is a Swift rewrite that calls AVFoundation's load(_:isolation:),
+  # which the Xcode on the CI macOS runner doesn't have ("Extra argument
+  # 'isolation' in call"). 2.12.1 is the last Objective-C release and supports
+  # Flutter 3.47. Remove once CI builds with a newer Xcode.
+  video_player_avfoundation: 2.12.1
