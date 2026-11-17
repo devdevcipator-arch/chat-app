@@ -57,8 +57,21 @@ jobs:
             '{SUPABASE_URL: $url, SUPABASE_PUBLISHABLE_KEY: $key, API_BASE_URL: $api, R2_PUBLIC_BASE: $r2}' \
             > env.json
 
-      - name: Show Xcode version
-        run: xcodebuild -version && xcrun swift --version
+      # The image defaults to an older Xcode (16.4), but current plugins use
+      # iOS 26 SDK APIs (e.g. connectivity_plus: NWPath.isUltraConstrained).
+      # Select the newest Xcode installed on the runner.
+      - name: Select newest Xcode
+        run: |
+          ls -d /Applications/Xcode_*.app
+          newest=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sed -E 's#.*/Xcode_([0-9.]+)\.app#\1#' | sort -V | tail -1)
+          echo "Selecting Xcode $newest"
+          sudo xcode-select -s "/Applications/Xcode_${newest}.app"
+          xcodebuild -version && xcrun swift --version
+          major=${newest%%.*}
+          if [ "$major" -lt 26 ]; then
+            echo "::error::Newest Xcode on this runner is $newest; the iOS plugins need Xcode 26+. Use a runner image that has it."
+            exit 1
+          fi
 
       - name: flutter pub get
         run: flutter pub get
