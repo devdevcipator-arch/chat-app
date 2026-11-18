@@ -7,6 +7,8 @@ const sizes = {
   xs: "size-5 text-[9px]",
   sm: "size-9 text-xs",
   md: "size-9 text-xs sm:size-10 sm:text-sm",
+  /** Conversation list rows: 48px on phones, the usual 40px on desktop. */
+  row: "size-12 text-base md:size-10 md:text-sm",
   lg: "size-12 text-base sm:size-14 sm:text-lg",
   xl: "size-24 text-3xl sm:size-28 sm:text-4xl",
 } as const;

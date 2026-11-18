@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// Phones narrower than this (iPhone SE / mini at 375pt, compact Androids at
-/// 360dp) get a tighter layout: smaller paddings, headers, avatars and text.
-const compactWidthBreakpoint = 380.0;
+/// Only extra-small phones (narrower than 360pt, e.g. the 320pt iPhone SE 1st
+/// gen) get a tighter layout. Standard phones (360–430pt) keep full spacing,
+/// so lists fill the screen comfortably instead of bunching up at the top.
+const compactWidthBreakpoint = 360.0;
 
 /// How much sizes shrink on compact phones.
 const _compactFactor = 0.86;

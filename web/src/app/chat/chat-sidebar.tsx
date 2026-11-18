@@ -280,9 +280,9 @@ export function ChatSidebar({
       />
 
       <div className="flex min-h-0 w-full flex-1 flex-col md:w-80 md:flex-none">
-        <div className="flex items-center justify-between gap-2 px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-2 sm:px-4 sm:pt-[max(1rem,env(safe-area-inset-top))] sm:pb-3">
-          <h1 className="text-lg font-semibold tracking-tight">{TAB_TITLES[tab]}</h1>
-          <div className="flex items-center gap-0.5">
+        <div className="flex items-center justify-between gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
+          <h1 className="text-xl font-bold tracking-tight md:text-lg md:font-semibold">{TAB_TITLES[tab]}</h1>
+          <div className="flex items-center gap-3 md:gap-0.5">
             {tab === "groups" && (
               <NewGroupButton
                 meId={me.id}
@@ -303,7 +303,7 @@ export function ChatSidebar({
             <Link
               href="/settings/profile"
               aria-label={`${myName}, @${me.username}: profile and settings`}
-              className="ml-1 rounded-full md:hidden"
+              className="flex size-9 items-center justify-center rounded-full md:hidden"
             >
               <Avatar name={myName} src={me.avatarUrl} size="sm" />
             </Link>
@@ -324,7 +324,7 @@ export function ChatSidebar({
         )}
         {tab !== "calls" && <NotificationPrompt />}
 
-        <div className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain sm:mt-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6 md:mt-1 md:pb-0">
           {tab === "calls" ? (
             <CallsPanel meId={me.id} chats={chats} />
           ) : tab === "chats" && chatSearch ? (
@@ -398,7 +398,7 @@ function SearchBox({
   label: string;
 }) {
   return (
-    <div className="px-3">
+    <div className="px-4 pt-1 pb-3.5 md:px-3 md:pt-0 md:pb-2">
       <div className="relative">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="pointer-events-none absolute inset-y-0 left-3 my-auto size-4 text-zinc-400">
           <circle cx="11" cy="11" r="7" />
@@ -413,7 +413,7 @@ function SearchBox({
           autoComplete="off"
           autoCapitalize="none"
           spellCheck={false}
-          className="w-full rounded-lg border border-zinc-200 bg-white py-2 pr-3 pl-9 text-base outline-none md:text-sm transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-900"
+          className="h-11 w-full rounded-xl border border-zinc-200 bg-white pr-3 pl-9 md:h-9 md:rounded-lg text-base outline-none md:text-sm transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-900"
         />
       </div>
     </div>
@@ -446,13 +446,13 @@ function ChatList({
   empty: string;
 }) {
   return (
-    <nav aria-label="Conversations" className="px-2 pb-2">
+    <nav aria-label="Conversations" className="pb-2 md:px-2">
       {chats.length === 0 ? (
-        <p className="mx-1 rounded-lg border border-dashed border-zinc-300 px-3 py-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
+        <p className="mx-4 rounded-lg border border-dashed md:mx-1 border-zinc-300 px-3 py-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
           {empty}
         </p>
       ) : (
-        <ul className="space-y-0.5">
+        <ul className="divide-y divide-zinc-200/70 md:space-y-0.5 md:divide-y-0 dark:divide-zinc-800/40">
           {chats.map((chat) => (
             <ChatRow key={chat.chatId} chat={chat} meId={meId} active={chat.chatId === activeChatId} />
           ))}
@@ -484,14 +484,14 @@ function ChatRow({ chat, meId, active }: { chat: ChatSummary; meId: string; acti
         href={`/chat/${chat.chatId}`}
         aria-current={active ? "page" : undefined}
         aria-label={`${name}${unread ? `, ${chat.unreadCount} unread` : ""}${chat.isMuted ? ", muted" : ""}`}
-        className={`flex items-center gap-3 rounded-lg py-2 pr-10 pl-2 transition ${
+        className={`flex items-center gap-3.5 py-3.5 pr-11 pl-4 transition md:gap-3 md:rounded-lg md:py-2 md:pr-10 md:pl-2 ${
           active ? "bg-indigo-50 dark:bg-indigo-950/50" : "hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60"
         }`}
       >
-        <Avatar name={name} src={group ? null : chat.other?.avatarUrl} group={group} />
-        <div className="min-w-0 flex-1">
+        <Avatar name={name} src={group ? null : chat.other?.avatarUrl} group={group} size="row" />
+        <div className="min-w-0 flex-1 space-y-0.5 leading-snug">
           <div className="flex items-baseline gap-1.5">
-            <p className={`min-w-0 flex-1 truncate text-sm ${unread ? "font-semibold" : "font-medium"}`}>{name}</p>
+            <p className={`min-w-0 flex-1 truncate text-[15px] md:text-sm ${unread ? "font-semibold" : "font-medium"}`}>{name}</p>
             {chat.isMuted && <MutedIcon />}
             <time
               suppressHydrationWarning
@@ -501,10 +501,10 @@ function ChatRow({ chat, meId, active }: { chat: ChatSummary; meId: string; acti
               {formatListTime(last?.createdAt ?? chat.createdAt)}
             </time>
           </div>
-          {subtitle && <p className="truncate text-xs text-zinc-500">{subtitle}</p>}
+          {subtitle && <p className="truncate text-xs leading-snug text-zinc-500">{subtitle}</p>}
           <div className="flex items-center gap-2">
             <p
-              className={`min-w-0 flex-1 truncate text-xs ${
+              className={`min-w-0 flex-1 truncate text-[13px] leading-snug md:text-xs ${
                 unread ? "font-medium text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"
               }`}
             >
@@ -523,7 +523,7 @@ function ChatRow({ chat, meId, active }: { chat: ChatSummary; meId: string; acti
           </div>
         </div>
       </Link>
-      <div className="absolute top-2 right-1.5 opacity-100 transition md:opacity-0 md:group-focus-within/row:opacity-100 md:group-hover/row:opacity-100">
+      <div className="absolute top-3 right-2 opacity-100 md:top-2 md:right-1.5 transition md:opacity-0 md:group-focus-within/row:opacity-100 md:group-hover/row:opacity-100">
         <ChatMenu
           chatId={chat.chatId}
           type={chat.type}

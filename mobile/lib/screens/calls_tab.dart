@@ -246,7 +246,7 @@ class _CallsTabState extends State<CallsTab> {
                     name: name,
                     imageUrl: log.isGroup ? null : log.peer?.avatarImageUrl,
                     group: log.isGroup,
-                    size: context.compact(44),
+                    size: context.compact(48),
                   ),
                   title: Text(
                     name,

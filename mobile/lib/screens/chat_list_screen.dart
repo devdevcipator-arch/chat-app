@@ -332,7 +332,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Widget _searchField(TextEditingController controller, String hint) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: EdgeInsets.fromLTRB(context.compact(12), 4, context.compact(12), context.compact(8)),
+      padding: EdgeInsets.fromLTRB(context.compact(16), context.compact(8), context.compact(16), context.compact(14)),
       child: TextField(
         controller: controller,
         onChanged: (_) => setState(() {}),
@@ -601,11 +601,12 @@ class _ChatTile extends StatelessWidget {
     return ListTile(
       onTap: onTap,
       onLongPress: onLongPress,
+      minVerticalPadding: context.compact(12),
       leading: Avatar(
         name: chat.name,
         imageUrl: chat.isGroup ? null : chat.other?.avatarImageUrl,
         group: chat.isGroup,
-        size: context.compact(44),
+        size: context.compact(48),
       ),
       title: Row(
         children: [
