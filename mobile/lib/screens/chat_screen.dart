@@ -946,7 +946,11 @@ class _MessageBubble extends StatelessWidget {
         if (math != null) {
           return MathResultCard(expression: math.expression, result: math.result, mine: mine, foreground: textColor);
         }
-        return Text(message.content ?? '', style: TextStyle(color: textColor, fontSize: 15, height: 1.3));
+        return Text(
+          message.content ?? '',
+          softWrap: true,
+          style: TextStyle(color: textColor, fontSize: 15, height: 1.3),
+        );
       case 'image':
         // Decode at bubble size, not full resolution, to keep scrolling smooth.
         final decodeWidth = (260 * MediaQuery.devicePixelRatioOf(context)).round();

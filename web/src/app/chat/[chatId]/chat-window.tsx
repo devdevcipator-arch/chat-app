@@ -551,7 +551,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
           const el = e.currentTarget;
           stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
-        className="min-h-0 flex-1 overflow-y-auto px-3 py-4 md:px-6"
+        className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-4 md:px-6"
         role="log"
         aria-live="polite"
       >
@@ -564,7 +564,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
             </p>
           </div>
         ) : (
-          <ol className="flex flex-col gap-1">
+          <ol className="flex min-w-0 flex-col gap-1">
             <AnimatePresence initial={false}>
               {messages.map((message, i) => (
                 <MessageBubble
@@ -693,11 +693,11 @@ function MessageBubble({
   switch (message.message_type) {
     case "image":
       body = (
-        <div className={`flex flex-col gap-1 ${mine ? "items-end" : "items-start"}`}>
+        <div className={`flex min-w-0 max-w-full flex-col gap-1 ${mine ? "items-end" : "items-start"}`}>
           <ImageMessage src={mediaSrc} progress={message.progress} sending={sending} onOpen={onOpenImage} />
           {message.content && (
             <div
-              className={`max-w-[min(18rem,70vw)] rounded-2xl px-3.5 py-2 text-[15px] leading-snug break-words whitespace-pre-wrap ${
+              className={`max-w-[min(18rem,70vw)] min-w-0 rounded-2xl px-3.5 py-2 text-[15px] leading-snug break-words whitespace-pre-wrap [overflow-wrap:anywhere] ${
                 mine
                   ? "rounded-tr-md bg-indigo-600 text-white"
                   : "rounded-tl-md bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
@@ -756,7 +756,7 @@ function MessageBubble({
       }
       body = (
         <div
-          className={`rounded-2xl px-3.5 py-2 text-[15px] leading-snug break-words whitespace-pre-wrap ${
+          className={`max-w-full min-w-0 overflow-hidden rounded-2xl px-3.5 py-2 text-[15px] leading-snug break-words whitespace-pre-wrap [overflow-wrap:anywhere] ${
             mine
               ? "rounded-br-md bg-indigo-600 text-white"
               : "rounded-bl-md bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
@@ -780,9 +780,9 @@ function MessageBubble({
       initial={{ opacity: 0, y: 8, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.18, ease: "easeOut" }}
-      className={`flex ${mine ? "justify-end" : "justify-start"} ${grouped ? "" : "mt-2"}`}
+      className={`flex min-w-0 ${mine ? "justify-end" : "justify-start"} ${grouped ? "" : "mt-2"}`}
     >
-      <div className={`flex max-w-[80%] flex-col md:max-w-[65%] ${mine ? "items-end" : "items-start"}`}>
+      <div className={`flex min-w-0 max-w-[85%] flex-col sm:max-w-[72%] ${mine ? "items-end" : "items-start"}`}>
         {senderLabel && !grouped && (
           <span className="mb-1 flex items-center gap-1.5 px-0.5 text-xs font-medium text-indigo-600 dark:text-indigo-400">
             <Avatar name={senderLabel} src={senderAvatar} size="xs" />
