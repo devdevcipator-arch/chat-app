@@ -76,6 +76,19 @@ jobs:
       - name: flutter pub get
         run: flutter pub get
 
+      # Regenerate Pods from scratch so Podfile.lock and Pods/Manifest.lock
+      # match; a stale sandbox fails the build with "The sandbox is not in
+      # sync with the Podfile.lock".
+      - name: Clean CocoaPods sync
+        working-directory: mobile/ios
+        run: |
+          pod --version
+          rm -rf Pods Podfile.lock
+          pod install --repo-update
+          if [ -f Pods/Manifest.lock ]; then
+            diff Podfile.lock Pods/Manifest.lock
+          fi
+
       - name: Build iOS app (unsigned)
         run: flutter build ios --release --no-codesign --dart-define-from-file=env.json --build-number=${{ github.run_number }}
 
