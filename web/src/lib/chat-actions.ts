@@ -82,6 +82,19 @@ export async function createGroup(
   return { ok: true, chatId: data };
 }
 
+/** Joins a group someone else created (or re-opens one I'm in). */
+export async function joinGroup(
+  supabase: Client,
+  groupId: string,
+): Promise<{ ok: true; chatId: string } | { ok: false; error: string }> {
+  const { data, error } = await supabase.rpc("join_group", { p_group_id: groupId });
+  if (error?.code === "P0002") return { ok: false, error: "That group no longer exists." };
+  if (error) return { ok: false, error: errorMessage(error) };
+  if (!data) return { ok: false, error: "Couldn't join the group. Please try again." };
+  emitChatEvent({ type: "updated", chatId: data });
+  return { ok: true, chatId: data };
+}
+
 /**
  * Opens the 1-on-1 chat with someone: the existing one (un-hidden if I had
  * deleted it) or a new one. Tells the sidebar to pick it up.

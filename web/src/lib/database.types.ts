@@ -496,6 +496,7 @@ export type Database = {
       }
       heartbeat_call: { Args: { p_call_id: string }; Returns: boolean }
       hide_chat: { Args: { p_chat_id: string }; Returns: undefined }
+      join_group: { Args: { p_group_id: string }; Returns: string }
       leave_group: { Args: { p_chat_id: string }; Returns: undefined }
       list_my_chats: {
         Args: never
@@ -526,6 +527,16 @@ export type Database = {
       remove_group_member: {
         Args: { p_chat_id: string; p_user_id: string }
         Returns: undefined
+      }
+      search_groups: {
+        Args: { p_query: string }
+        Returns: {
+          avatar_url: string
+          id: string
+          is_member: boolean
+          member_count: number
+          title: string
+        }[]
       }
       set_chat_muted: {
         Args: { p_chat_id: string; p_muted: boolean }

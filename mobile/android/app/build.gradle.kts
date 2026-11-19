@@ -51,6 +51,32 @@ android {
         versionName = flutter.versionName
     }
 
+    packaging {
+        jniLibs {
+            // Store native libraries compressed in the APK: a much smaller
+            // download (they're extracted once at install time).
+            useLegacyPackaging = true
+            // Optional Agora extensions the app never enables (beauty, virtual
+            // background, spatial audio, face/lip tracking, content
+            // inspection, AV1, screen capture). Agora loads each one only when
+            // its feature is turned on, so calls work without them. Remove a
+            // line here before using that feature.
+            excludes += listOf(
+                "**/libagora_lip_sync_extension.so",
+                "**/libagora_clear_vision_extension.so",
+                "**/libagora_spatial_audio_extension.so",
+                "**/libagora_face_capture_extension.so",
+                "**/libagora_face_detection_extension.so",
+                "**/libagora_segmentation_extension.so",
+                "**/libagora_audio_beauty_extension.so",
+                "**/libagora_content_inspect_extension.so",
+                "**/libagora_video_quality_analyzer_extension.so",
+                "**/libagora_video_av1_encoder_extension.so",
+                "**/libagora_screen_capture_extension.so",
+            )
+        }
+    }
+
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {
@@ -70,6 +96,10 @@ android {
                 logger.warn("No release keystore (key.properties / ANDROID_* env): signing release with the debug key.")
                 signingConfigs.getByName("debug")
             }
+            // R8: strip unused Java/Kotlin code and unreferenced resources.
+            // Keep rules for reflection/JNI users live in proguard-rules.pro.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

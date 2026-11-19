@@ -27,6 +27,8 @@ String chatActionError(Object error) {
         return 'Add at least one other person.';
       case 'not a member':
         return "You're no longer in this conversation.";
+      case 'not a group':
+        return 'That group no longer exists.';
     }
     if (error.code == '42501') return 'Your session has expired. Please sign in again.';
     if (error.code == 'P0002') return 'That account is no longer available.';
@@ -54,6 +56,19 @@ abstract final class ChatRepository {
       'create_group_chat',
       params: {'p_title': title, 'p_member_ids': memberIds},
     );
+    return chatId as String;
+  }
+
+  /// Every group on the platform whose title contains [query] (2+ chars),
+  /// including ones I'm not in. Only public-safe fields come back.
+  static Future<List<GroupSearchResult>> searchGroups(String query) async {
+    final rows = await supabase.rpc('search_groups', params: {'p_query': query}) as List<dynamic>;
+    return rows.map((row) => GroupSearchResult.fromRow(row as Map<String, dynamic>)).toList();
+  }
+
+  /// Joins a group someone else created (no-op if I'm already in it).
+  static Future<String> joinGroup(String groupId) async {
+    final chatId = await supabase.rpc('join_group', params: {'p_group_id': groupId});
     return chatId as String;
   }
 

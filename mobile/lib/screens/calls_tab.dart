@@ -6,6 +6,7 @@ import '../core/media.dart';
 import '../core/responsive.dart';
 import '../core/supabase.dart';
 import '../core/time_format.dart';
+import '../data/local_cache.dart';
 import '../models/chat_summary.dart';
 import '../models/profile.dart';
 import '../services/call_controller.dart';
@@ -118,7 +119,9 @@ class CallsTab extends StatefulWidget {
 
 class _CallsTabState extends State<CallsTab> {
   final _calls = CallController.instance;
-  List<_CallLog>? _logs;
+
+  /// Cached history renders on the first frame; [_load] refreshes it.
+  late List<_CallLog>? _logs = _fromRows(LocalCache.rows(widget.meId, 'calls'));
   bool _failed = false;
   late CallPhase _phase = _calls.phase;
 
@@ -143,6 +146,15 @@ class _CallsTabState extends State<CallsTab> {
     unawaited(_load());
   }
 
+  List<_CallLog>? _fromRows(List<Map<String, dynamic>>? rows) {
+    if (rows == null) return null;
+    try {
+      return [for (final row in rows) _CallLog.fromRow(row, widget.meId)];
+    } catch (_) {
+      return null; // stale cache shape: just load fresh
+    }
+  }
+
   Future<void> _load() async {
     try {
       final rows = await supabase
@@ -154,6 +166,7 @@ class _CallsTabState extends State<CallsTab> {
           .eq('call_participants.user_id', widget.meId)
           .order('created_at', ascending: false)
           .limit(_callLimit);
+      unawaited(LocalCache.saveRows(widget.meId, 'calls', rows));
       if (!mounted) return;
       setState(() {
         _logs = [for (final row in rows) _CallLog.fromRow(row, widget.meId)];

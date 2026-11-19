@@ -9,8 +9,10 @@ import 'package:image_picker/image_picker.dart';
 
 import '../core/api.dart';
 import '../core/media.dart';
+import '../core/supabase.dart';
 import '../data/chat_repository.dart';
 import '../data/gallery_repository.dart';
+import '../data/local_cache.dart';
 import '../models/chat_summary.dart';
 import '../models/gallery_item.dart';
 import '../widgets/audio_player.dart';
@@ -27,9 +29,30 @@ class GalleryScreen extends StatefulWidget {
 }
 
 class _GalleryScreenState extends State<GalleryScreen> {
-  List<GalleryItem> _items = const [];
-  bool _loading = true;
+  final String? _meId = supabase.auth.currentUser?.id;
+
+  // Cached items render on the first frame; only a first visit with nothing
+  // cached shows a spinner.
+  late final List<GalleryItem>? _cached = _fromCache();
+  late List<GalleryItem> _items = _cached ?? const [];
+  late bool _loading = _cached == null;
   String? _error;
+
+  List<GalleryItem>? _fromCache() {
+    final me = _meId;
+    final rows = me == null ? null : LocalCache.rows(me, 'gallery');
+    if (rows == null) return null;
+    try {
+      return [for (final row in rows) GalleryItem.fromMap(row)];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _persist() {
+    final me = _meId;
+    if (me != null) unawaited(LocalCache.saveRows(me, 'gallery', [for (final i in _items) i.toMap()]));
+  }
 
   /// Uploads in flight: name → progress.
   final _uploads = <String, double>{};
@@ -49,11 +72,13 @@ class _GalleryScreenState extends State<GalleryScreen> {
         _loading = false;
         _error = null;
       });
+      _persist();
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = "Couldn't load your gallery.";
+        // Cached items stay on screen; only an empty gallery shows the error.
+        if (_items.isEmpty) _error = "Couldn't load your gallery.";
       });
     }
   }
@@ -113,6 +138,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
         },
       );
       if (mounted) setState(() => _items = [item, ..._items]);
+      _persist();
     } catch (e) {
       _snack('$name: ${e is ApiException ? e.message : 'upload failed.'}');
     } finally {
@@ -149,6 +175,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
     try {
       await GalleryRepository.delete(item.id);
       if (mounted) setState(() => _items = _items.where((i) => i.id != item.id).toList());
+      _persist();
       _snack('Deleted');
     } catch (e) {
       _snack(e is ApiException ? e.message : "Couldn't delete that item.");

@@ -18,6 +18,31 @@ class LastMessage {
   final int? durationSeconds;
 }
 
+/// One row of the `search_groups` RPC: any group on the platform.
+class GroupSearchResult {
+  const GroupSearchResult({
+    required this.id,
+    required this.title,
+    this.avatarUrl,
+    this.memberCount = 0,
+    this.isMember = false,
+  });
+
+  final String id;
+  final String title;
+  final String? avatarUrl;
+  final int memberCount;
+  final bool isMember;
+
+  factory GroupSearchResult.fromRow(Map<String, dynamic> row) => GroupSearchResult(
+        id: row['id'] as String,
+        title: (row['title'] as String?) ?? 'Group',
+        avatarUrl: row['avatar_url'] as String?,
+        memberCount: (row['member_count'] as num?)?.toInt() ?? 0,
+        isMember: row['is_member'] == true,
+      );
+}
+
 /// One row of the `list_my_chats` RPC.
 class ChatSummary {
   const ChatSummary({

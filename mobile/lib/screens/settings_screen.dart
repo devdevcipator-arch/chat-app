@@ -13,6 +13,7 @@ import '../data/local_cache.dart';
 import '../data/profile_repository.dart';
 import '../models/profile.dart';
 import '../widgets/avatar.dart';
+import 'gallery_screen.dart';
 
 /// Profile (display name, photo) and appearance. Pops with the updated profile.
 class SettingsScreen extends StatefulWidget {
@@ -223,6 +224,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
                       )
                     : IconButton(tooltip: 'Save', onPressed: _saveName, icon: const Icon(Icons.check)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Card(
+              margin: EdgeInsets.zero,
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Gallery'),
+                subtitle: const Text('Your saved photos, videos and files'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const GalleryScreen())),
               ),
             ),
             const SizedBox(height: 24),

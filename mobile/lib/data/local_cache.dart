@@ -160,6 +160,20 @@ abstract final class LocalCache {
     } catch (_) {}
   }
 
+  // --- Raw rows (call history, gallery) ----------------------------------------
+
+  /// JSON rows last saved under [name] (e.g. 'calls', 'gallery'), so a screen
+  /// can render them on its first frame while it refreshes.
+  static List<Map<String, dynamic>>? rows(String userId, String name) {
+    final json = _readJson(_key(userId, 'rows.$name'));
+    if (json is! List) return null;
+    return json.whereType<Map<String, dynamic>>().toList();
+  }
+
+  static Future<void> saveRows(String userId, String name, List<Map<String, dynamic>> rows) async {
+    if (_isActive(userId)) await _writeJson(_key(userId, 'rows.$name'), rows);
+  }
+
   // --- Calls badge ---------------------------------------------------------------
 
   /// When I last opened the Calls tab (`last_seen_calls_at`).

@@ -1373,7 +1373,7 @@ class _GalleryPickerSheetState extends State<_GalleryPickerSheet> {
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           final items = snapshot.data!;
           if (items.isEmpty) {
-            return const Center(child: Text('Your gallery is empty.\nAdd files from Menu → Gallery.', textAlign: TextAlign.center));
+            return const Center(child: Text('Your gallery is empty.\nAdd files from Settings → Gallery.', textAlign: TextAlign.center));
           }
           return GridView.builder(
             padding: const EdgeInsets.all(12),

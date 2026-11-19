@@ -21,7 +21,6 @@ import '../widgets/avatar.dart';
 import '../widgets/offline_banner.dart';
 import 'calls_tab.dart';
 import 'chat_screen.dart';
-import 'gallery_screen.dart';
 import 'new_group_screen.dart';
 import 'settings_screen.dart';
 
@@ -235,6 +234,42 @@ class _ChatListScreenState extends State<ChatListScreen> {
     }
   }
 
+  /// Joins (or re-opens) a group found by search and opens it right away;
+  /// the list row is added optimistically, the next refresh fills it in.
+  /// Returns an error message, or null on success.
+  Future<String?> _joinGroup(GroupSearchResult group) async {
+    try {
+      final chatId = await ChatRepository.joinGroup(group.id);
+      if (!mounted) return null;
+      final summary = _chats.where((c) => c.chatId == chatId).firstOrNull ??
+          ChatSummary(
+            chatId: chatId,
+            type: 'group',
+            createdAt: DateTime.now(),
+            other: null,
+            lastMessage: null,
+            title: group.title,
+            avatarUrl: group.avatarUrl,
+            memberCount: group.isMember ? group.memberCount : group.memberCount + 1,
+          );
+      setState(() {
+        _chats = [summary, ..._chats.where((c) => c.chatId != chatId)];
+        _chatSearch.clear();
+        _groupFilter.clear();
+      });
+      unawaited(_openChat(chatId, summary: summary));
+      return null;
+    } catch (e) {
+      return isOfflineError(e) ? "You're offline. Connect to join groups." : chatActionError(e);
+    }
+  }
+
+  Widget _discoverGroups(String query) => _DiscoverGroups(
+        query: query,
+        knownChatIds: {for (final c in _chats) c.chatId},
+        onJoin: _joinGroup,
+      );
+
   Future<void> _newGroup() async {
     final chatId = await Navigator.of(context).push<String>(
       MaterialPageRoute(builder: (_) => NewGroupScreen(me: _me)),
@@ -257,8 +292,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
       ),
     ));
   }
-
-  void _openGallery() => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const GalleryScreen()));
 
   Future<void> _chatActions(ChatSummary chat) async {
     final choice = await showModalBottomSheet<String>(
@@ -358,12 +391,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
   }
 
-  /// Chats search results: matching groups first (so existing groups are
-  /// never buried), then direct chats, then "Find People" for an @username.
-  Widget _buildSearchResults(List<ChatSummary> matches, String query) {
+  /// Search results. My matching groups first (filtered locally, instantly),
+  /// then direct chats, then groups by others from the server ("Discover"),
+  /// then "Find People" for an @username. [groupsOnly] is the Groups tab.
+  Widget _buildSearchResults(List<ChatSummary> matches, String query, {bool groupsOnly = false}) {
     final groups = matches.where((c) => c.isGroup).toList();
-    final directs = matches.where((c) => !c.isGroup).toList();
-    final username = usernameQuery(query);
+    final directs = groupsOnly ? const <ChatSummary>[] : matches.where((c) => !c.isGroup).toList();
+    final username = groupsOnly ? null : usernameQuery(query);
     Widget tile(ChatSummary c) => _ChatTile(
           key: ValueKey(c.chatId),
           chat: c,
@@ -375,8 +409,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.only(bottom: 88),
       children: [
-        if (groups.isNotEmpty) ...[_SectionHeader('Groups', groups.length), ...groups.map(tile)],
+        if (groups.isNotEmpty) ...[_SectionHeader('Your Groups', groups.length), ...groups.map(tile)],
         if (directs.isNotEmpty) ...[_SectionHeader('Direct Chats', directs.length), ...directs.map(tile)],
+        if (groups.isEmpty && directs.isEmpty && username == null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(32, 32, 32, 8),
+            child: Text(groupsOnly ? 'None of your groups match.' : 'No matching chats or groups.',
+                textAlign: TextAlign.center),
+          ),
+        _discoverGroups(query),
         if (username != null) ...[
           const _SectionHeader('Find People (@username)'),
           _PeopleLookup(
@@ -385,11 +426,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
             onStartChat: _startChat,
             onStarted: () => setState(_chatSearch.clear),
           ),
-        ] else if (matches.isEmpty)
-          const Padding(
-            padding: EdgeInsets.fromLTRB(32, 64, 32, 0),
-            child: Text('No matching chats or groups.', textAlign: TextAlign.center),
-          ),
+        ],
       ],
     );
   }
@@ -422,7 +459,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
       appBar: AppBar(
         title: Text(_titles[_tab]),
         actions: [
-          IconButton(tooltip: 'Gallery', onPressed: _openGallery, icon: const Icon(Icons.photo_library_outlined)),
           IconButton(
             tooltip: 'Settings',
             onPressed: _openSettings,
@@ -458,13 +494,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 ),
                 Column(
                   children: [
-                    _searchField(_groupFilter, 'Search your groups…'),
+                    _searchField(_groupFilter, 'Search groups…'),
                     Expanded(
-                      child: _buildList(
-                        context,
-                        groups,
-                        query.isNotEmpty ? 'No matching groups.' : 'No groups yet.\nTap + to create one.',
-                      ),
+                      child: query.isEmpty
+                          ? _buildList(context, groups, 'No groups yet.\nTap + to create one, or search to find one.')
+                          : _buildSearchResults(groups, query, groupsOnly: true),
                     ),
                   ],
                 ),
@@ -813,6 +847,141 @@ class _PeopleLookupState extends State<_PeopleLookup> {
       margin: const EdgeInsets.symmetric(horizontal: 12),
       child: Semantics(liveRegion: true, child: body),
     );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// "Discover Groups": server-side group search (groups created by anyone)
+// ---------------------------------------------------------------------------
+
+/// Searches every group on the platform by title (debounced) and lists the
+/// ones not already shown under "Your Groups", with Join (or Open, for a
+/// group I'm in that isn't in my loaded list, e.g. hidden).
+class _DiscoverGroups extends StatefulWidget {
+  const _DiscoverGroups({required this.query, required this.knownChatIds, required this.onJoin});
+
+  final String query;
+
+  /// Chats already listed locally; they're left out of the results.
+  final Set<String> knownChatIds;
+
+  /// Returns an error message, or null on success.
+  final Future<String?> Function(GroupSearchResult group) onJoin;
+
+  @override
+  State<_DiscoverGroups> createState() => _DiscoverGroupsState();
+}
+
+class _DiscoverGroupsState extends State<_DiscoverGroups> {
+  static const _debounce = Duration(milliseconds: 250);
+  static const _minLength = 2;
+
+  Timer? _timer;
+
+  /// The query [_results] answer (null: nothing fetched yet).
+  String? _resultsFor;
+  List<GroupSearchResult> _results = const [];
+  String? _error;
+  String? _joiningId;
+
+  String get _query => widget.query.trim().replaceFirst(RegExp(r'^@'), '');
+
+  @override
+  void initState() {
+    super.initState();
+    _schedule();
+  }
+
+  @override
+  void didUpdateWidget(_DiscoverGroups old) {
+    super.didUpdateWidget(old);
+    if (old.query != widget.query) _schedule();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _schedule() {
+    _timer?.cancel();
+    final query = _query;
+    if (query.length < _minLength) return;
+    _timer = Timer(_debounce, () => _search(query));
+  }
+
+  Future<void> _search(String query) async {
+    List<GroupSearchResult>? results;
+    String? error;
+    try {
+      results = await ChatRepository.searchGroups(query);
+    } catch (e) {
+      error = isOfflineError(e) ? "You're offline. Connect to discover groups." : 'Group search failed. Try again.';
+    }
+    if (!mounted || _query != query) return; // a newer query is on its way
+    setState(() {
+      _resultsFor = query;
+      _results = results ?? const [];
+      _error = error;
+    });
+  }
+
+  Future<void> _join(GroupSearchResult group) async {
+    setState(() {
+      _joiningId = group.id;
+      _error = null;
+    });
+    final error = await widget.onJoin(group);
+    if (!mounted) return;
+    setState(() {
+      _joiningId = null;
+      _error = error;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _query;
+    if (query.length < _minLength) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    final muted = TextStyle(color: scheme.onSurfaceVariant);
+    // Stale results stay up while the next query loads, so nothing flickers.
+    final loading = _resultsFor != query;
+    final shown = _results.where((g) => !widget.knownChatIds.contains(g.id)).toList();
+
+    final children = <Widget>[
+      _SectionHeader('Discover Groups', shown.isEmpty ? null : shown.length),
+      if (loading && shown.isEmpty)
+        ListTile(
+          dense: true,
+          leading: const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+          title: Text('Searching groups for “$query”…'),
+        )
+      else if (_error != null && shown.isEmpty)
+        ListTile(dense: true, title: Text(_error!, style: TextStyle(color: scheme.error)))
+      else if (shown.isEmpty)
+        ListTile(dense: true, title: Text('No other groups match “$query”.', style: muted)),
+      for (final group in shown)
+        ListTile(
+          key: ValueKey('discover:${group.id}'),
+          onTap: _joiningId == null ? () => _join(group) : null,
+          leading: Avatar(name: group.title, group: true, size: context.compact(48)),
+          title: Text(group.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text(group.memberCount == 1 ? '1 member' : '${group.memberCount} members'),
+          trailing: _joiningId == group.id
+              ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+              : group.isMember
+                  ? OutlinedButton(onPressed: _joiningId == null ? () => _join(group) : null, child: const Text('Open'))
+                  : FilledButton(onPressed: _joiningId == null ? () => _join(group) : null, child: const Text('Join')),
+        ),
+      if (_error != null && shown.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(_error!, style: TextStyle(color: scheme.error)),
+        ),
+    ];
+    return Semantics(liveRegion: true, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children));
   }
 }
 

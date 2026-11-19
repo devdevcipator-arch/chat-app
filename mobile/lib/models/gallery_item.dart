@@ -37,4 +37,14 @@ class GalleryItem {
         size: (map['file_size'] as num).toInt(),
         createdAt: DateTime.parse(map['created_at'] as String),
       );
+
+  /// Inverse of [GalleryItem.fromMap] (used by the local cache).
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'media_url': key,
+        'file_name': fileName,
+        'file_type': kind,
+        'file_size': size,
+        'created_at': createdAt.toIso8601String(),
+      };
 }

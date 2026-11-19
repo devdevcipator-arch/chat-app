@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Avatar } from "@/components/avatar";
 import { ThemeSync } from "@/components/theme";
 import type { Profile } from "@/lib/auth";
-import { markRead } from "@/lib/chat-actions";
+import { joinGroup, markRead } from "@/lib/chat-actions";
 import { onChatEvent } from "@/lib/chat-events";
 import {
   chatMatches,
@@ -27,6 +27,7 @@ import { NotificationPrompt } from "./notification-prompt";
 import { BottomNav, GalleryIcon, NavRail, type SidebarTab, type TabBadges } from "./sidebar-nav";
 import { usePageActive, useUnreadTitle } from "./use-page-attention";
 import { useMissedCalls } from "./use-missed-calls";
+import { DiscoverGroups, type GroupResult } from "./group-search";
 import { PeopleLookup, usernameQuery } from "./user-search";
 
 const CHAT_PATH = /^\/chat\/([0-9a-f-]{36})/i;
@@ -234,6 +235,17 @@ export function ChatSidebar({
     return null;
   }
 
+  /** Joins (or re-opens) a group found by search, then opens it. */
+  async function openFoundGroup(group: GroupResult): Promise<string | null> {
+    const result = await joinGroup(supabase, group.id);
+    if (!result.ok) return result.error;
+    setChatQuery("");
+    setGroupFilter("");
+    await refresh();
+    router.push(`/chat/${result.chatId}`);
+    return null;
+  }
+
   const myName = me.displayName || me.username;
 
   // Which list shows. Opening a chat of the other kind (a link, a
@@ -261,6 +273,7 @@ export function ChatSidebar({
   const searchDirects = shownChats.filter((c) => c.type !== "group");
   const groupQuery = groupFilter.trim();
   const groupChats = groupQuery ? allGroups.filter((c) => chatMatches(c, groupQuery)) : allGroups;
+  const knownChatIds = new Set(chats.map((c) => c.chatId));
   const { count: missedCalls, markSeen: markCallsSeen } = useMissedCalls(me.id, tab === "calls");
   const selectTab = (next: SidebarTab) => {
     setTab(next);
@@ -320,7 +333,7 @@ export function ChatSidebar({
           />
         )}
         {tab === "groups" && (
-          <SearchBox value={groupFilter} onChange={setGroupFilter} placeholder="Search your groups…" label="Search your groups" />
+          <SearchBox value={groupFilter} onChange={setGroupFilter} placeholder="Search groups…" label="Search your groups and discover others" />
         )}
         {tab !== "calls" && <NotificationPrompt />}
 
@@ -332,7 +345,7 @@ export function ChatSidebar({
             // buried under direct chats or the @username lookup.
             <div className="space-y-3 pb-2">
               {searchGroups.length > 0 && (
-                <SearchSection title="Groups" count={searchGroups.length}>
+                <SearchSection title="Your Groups" count={searchGroups.length}>
                   <ChatList chats={searchGroups} meId={me.id} activeChatId={activeChatId} empty="" />
                 </SearchSection>
               )}
@@ -341,6 +354,7 @@ export function ChatSidebar({
                   <ChatList chats={searchDirects} meId={me.id} activeChatId={activeChatId} empty="" />
                 </SearchSection>
               )}
+              <DiscoverGroups query={chatSearch} knownChatIds={knownChatIds} onJoin={openFoundGroup} />
               {usernameQuery(chatSearch) ? (
                 <SearchSection title="Find People (@username)">
                   <div className="px-2">
@@ -354,6 +368,14 @@ export function ChatSidebar({
                   </p>
                 )
               )}
+            </div>
+          ) : tab === "groups" && groupQuery ? (
+            // My matching groups instantly, then everyone else's from the server.
+            <div className="space-y-3 pb-2">
+              <SearchSection title="Your Groups" count={groupChats.length}>
+                <ChatList chats={groupChats} meId={me.id} activeChatId={activeChatId} empty="None of your groups match." />
+              </SearchSection>
+              <DiscoverGroups query={groupQuery} knownChatIds={knownChatIds} onJoin={openFoundGroup} />
             </div>
           ) : (
             <ChatList
