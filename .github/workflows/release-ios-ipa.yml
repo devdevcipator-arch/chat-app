@@ -12,7 +12,7 @@ permissions:
   contents: write # upload release assets
 
 concurrency:
-  group: release-ios-ipa
+  group: release-ios-ipa-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -20,24 +20,24 @@ jobs:
     # Intel image: the arm64 macOS pool (macos-latest) has been too congested
     # to pick up jobs. macos-13 is retired; macos-15-intel is the Intel option.
     runs-on: macos-15-intel
-    timeout-minutes: 90
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: mobile
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+      CI: "true"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Flutter (stable)
-        uses: subosito/flutter-action@v2
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
         with:
-          channel: stable
-          # Same version as the Android workflow and local development.
-          flutter-version: 3.47.9
-          cache: true
+          node-version: "22"
 
-      - name: Write env.json from secrets
+      - name: Write .env from secrets
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
@@ -48,61 +48,69 @@ jobs:
             echo "::error::SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY secrets are required."
             exit 1
           fi
-          # API_BASE_URL falls back to the app's built-in default when unset.
-          jq -n \
-            --arg url "$SUPABASE_URL" \
-            --arg key "$SUPABASE_PUBLISHABLE_KEY" \
-            --arg api "${API_BASE_URL:-https://chat.devcipator.com}" \
-            --arg r2 "$R2_PUBLIC_BASE" \
-            '{SUPABASE_URL: $url, SUPABASE_PUBLISHABLE_KEY: $key, API_BASE_URL: $api, R2_PUBLIC_BASE: $r2}' \
-            > env.json
+          {
+            echo "EXPO_PUBLIC_SUPABASE_URL=$SUPABASE_URL"
+            echo "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$SUPABASE_PUBLISHABLE_KEY"
+            echo "EXPO_PUBLIC_API_BASE_URL=${API_BASE_URL:-https://chat.devcipator.com}"
+            echo "EXPO_PUBLIC_R2_PUBLIC_BASE=$R2_PUBLIC_BASE"
+          } > .env
 
-      # The image defaults to an older Xcode (16.4), but current plugins use
-      # iOS 26 SDK APIs (e.g. connectivity_plus: NWPath.isUltraConstrained).
+      - name: Write GoogleService-Info.plist (optional)
+        env:
+          GOOGLE_SERVICE_INFO_PLIST: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST }}
+        run: |
+          if [ -n "$GOOGLE_SERVICE_INFO_PLIST" ]; then printf '%s' "$GOOGLE_SERVICE_INFO_PLIST" > GoogleService-Info.plist; fi
+
       # Select the newest Xcode installed on the runner.
       - name: Select newest Xcode
         run: |
-          ls -d /Applications/Xcode_*.app
           newest=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sed -E 's#.*/Xcode_([0-9.]+)\.app#\1#' | sort -V | tail -1)
           echo "Selecting Xcode $newest"
           sudo xcode-select -s "/Applications/Xcode_${newest}.app"
-          xcodebuild -version && xcrun swift --version
-          major=${newest%%.*}
-          if [ "$major" -lt 26 ]; then
-            echo "::error::Newest Xcode on this runner is $newest; the iOS plugins need Xcode 26+. Use a runner image that has it."
-            exit 1
-          fi
+          xcodebuild -version
 
-      - name: flutter pub get
-        run: flutter pub get
-
-      # Regenerate Pods from scratch so Podfile.lock and Pods/Manifest.lock
-      # match; a stale sandbox fails the build with "The sandbox is not in
-      # sync with the Podfile.lock".
-      - name: Clean CocoaPods sync
-        working-directory: mobile/ios
+      - name: Install dependencies
         run: |
-          pod --version
-          rm -rf Pods Podfile.lock
-          pod install --repo-update
-          if [ -f Pods/Manifest.lock ]; then
-            diff Podfile.lock Pods/Manifest.lock
-          fi
+          if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      # Generates ios/ and runs `pod install` from a clean sandbox.
+      - name: Generate native iOS project (expo prebuild)
+        run: npx expo prebuild --platform ios --clean
 
       - name: Build iOS app (unsigned)
-        run: flutter build ios --release --no-codesign --dart-define-from-file=env.json --build-number=${{ github.run_number }}
+        run: |
+          workspace=$(ls -d ios/*.xcworkspace | head -1)
+          scheme=$(basename "$workspace" .xcworkspace)
+          xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Release \
+            -sdk iphoneos -destination "generic/platform=iOS" \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | tail -50
+          echo "SCHEME=$scheme" >> "$GITHUB_ENV"
 
       - name: Package chat-app.ipa
         run: |
+          app=$(ls -d build/Build/Products/Release-iphoneos/*.app | head -1)
           rm -rf "$RUNNER_TEMP/ipa" && mkdir -p "$RUNNER_TEMP/ipa/Payload"
-          cp -R build/ios/iphoneos/Runner.app "$RUNNER_TEMP/ipa/Payload/"
+          cp -R "$app" "$RUNNER_TEMP/ipa/Payload/"
           (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/chat-app.ipa" Payload)
           ls -lh "$GITHUB_WORKSPACE/chat-app.ipa"
+
+      - name: Upload IPA (workflow artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-app-ipa-${{ github.run_number }}
+          path: chat-app.ipa
+          retention-days: 14
 
       # The Android workflow creates the release for this commit (its tag uses
       # its own run number). Attach the IPA to that same release so the APK
       # and IPA ship together; wait for it if Android is still building.
       - name: Find release for this commit
+        if: github.ref == 'refs/heads/main'
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -126,6 +134,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Upload IPA to GitHub Release
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release.outputs.tag }}
@@ -134,4 +143,4 @@ jobs:
 
       - name: Clean up
         if: always()
-        run: rm -f env.json
+        run: rm -f .env GoogleService-Info.plist
