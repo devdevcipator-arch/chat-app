@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
-import { Pressable, StyleSheet, TextInput as RNTextInput, View } from "react-native";
-import { Text, TextInput } from "./Text";
+import { Pressable, StyleSheet, View } from "react-native";
+import { Text, TextInput, type TextInputRef } from "./Text";
 import { usePalette } from "./theme";
 
 /**
@@ -23,7 +23,7 @@ export function OtpInput({
   error?: boolean;
 }) {
   const c = usePalette();
-  const input = useRef<RNTextInput>(null);
+  const input = useRef<TextInputRef>(null);
   const [focused, setFocused] = useState(true);
 
   const set = (text: string) => {

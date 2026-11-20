@@ -1,5 +1,8 @@
-import { forwardRef } from "react";
+import { type ComponentRef, forwardRef } from "react";
 import { Text as RNText, TextInput as RNTextInput, type TextInputProps, type TextProps } from "react-native";
+
+/** The instance type of a TextInput (focus(), blur(), clear()). */
+export type TextInputRef = ComponentRef<typeof RNTextInput>;
 import { MAX_FONT_SCALE, usePalette } from "./theme";
 
 /**
@@ -18,7 +21,7 @@ export function Text({ style, muted, ...props }: TextProps & { muted?: boolean }
   );
 }
 
-export const TextInput = forwardRef<RNTextInput, TextInputProps>(function TextInput({ style, ...props }, ref) {
+export const TextInput = forwardRef<TextInputRef, TextInputProps>(function TextInput({ style, ...props }, ref) {
   const c = usePalette();
   return (
     <RNTextInput

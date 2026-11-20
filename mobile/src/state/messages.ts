@@ -81,6 +81,9 @@ const isDuplicate = (e: unknown) => (e as { code?: string } | null)?.code === "2
 async function deliver(message: ChatMessage): Promise<boolean> {
   const user = meId;
   if (!user || inFlight.has(message.id)) return false;
+  // Queued twice (reconnect + launch flush) and already delivered: done.
+  const now = current(message.chatId).find((m) => m.id === message.id);
+  if (!now || now.status === "sent") return now?.status === "sent";
   inFlight.add(message.id);
   try {
     const sent = message.type === "text" ? await deliverText(message, user) : await deliverMedia(message, user);

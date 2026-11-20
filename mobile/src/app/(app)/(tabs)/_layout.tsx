@@ -46,7 +46,7 @@ export default function TabsLayout() {
           title: "Chats",
           tabBarBadge: badge(allUnread),
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "chatbubble" : "chatbubble-outline"} size={23} color={color} />
+            <Ionicons name={focused ? "chatbubble" : "chatbubble-outline"} size={23} color={color as string} />
           ),
         }}
       />
@@ -55,7 +55,7 @@ export default function TabsLayout() {
         options={{
           title: "Groups",
           tabBarBadge: badge(groupUnread),
-          tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "people" : "people-outline"} size={24} color={color} />,
+          tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "people" : "people-outline"} size={24} color={color as string} />,
         }}
       />
       <Tabs.Screen
@@ -63,7 +63,7 @@ export default function TabsLayout() {
         options={{
           title: "Calls",
           tabBarBadge: badge(missed),
-          tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "call" : "call-outline"} size={22} color={color} />,
+          tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "call" : "call-outline"} size={22} color={color as string} />,
         }}
       />
     </Tabs>

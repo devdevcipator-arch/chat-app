@@ -46,8 +46,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
   backgroundColor: "#0A0A0A",
-  // RN 0.88 is New-Architecture-only and Hermes is the engine; stated explicitly anyway.
-  newArchEnabled: true,
+  // React Native 0.88 runs only on the New Architecture (there is no switch
+  // any more); Hermes is the JS engine.
   jsEngine: "hermes",
   splash: { image: "./assets/icon.png", resizeMode: "contain", backgroundColor: "#0A0A0A" },
   ios: {
@@ -62,7 +62,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       NSPhotoLibraryUsageDescription:
         "Chat App needs access to your photo library so you can share photos and videos and set a profile picture.",
       NSPhotoLibraryAddUsageDescription: "Chat App saves photos and videos you download from chats to your photo library.",
-      UIBackgroundModes: ["audio", "voip", ...(pushIos ? ["remote-notification"] : [])],
+      // Calls keep their audio when the app goes to the background.
+      UIBackgroundModes: ["audio", ...(pushIos ? ["voip", "remote-notification"] : [])],
       ITSAppUsesNonExemptEncryption: false,
     },
   },

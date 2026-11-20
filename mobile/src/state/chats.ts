@@ -82,7 +82,10 @@ export const Chats = {
       Chats.refreshSoon(); // a new chat, or a rename/membership change
       return;
     }
-    if (chat.lastMessage && Date.parse(chat.lastMessage.createdAt) > Date.parse(message.createdAt)) return;
+    // An echo of my own message that's already the preview: nothing to do.
+    if (chat.lastMessage && message.senderId === meId && chat.lastMessage.content === message.content && message.status === "sent") {
+      if (Date.parse(chat.lastMessage.createdAt) >= Date.parse(message.createdAt)) return;
+    }
     const fromOther = message.senderId !== meId && openChatId !== message.chatId && message.status === "sent";
     const updated: ChatSummary = {
       ...chat,

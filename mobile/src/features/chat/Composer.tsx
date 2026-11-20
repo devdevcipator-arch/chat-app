@@ -1,9 +1,9 @@
 import { type ReactNode, useRef, useState } from "react";
-import { Pressable, StyleSheet, type TextInput as RNTextInput, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { Config } from "../../lib/config";
 import { evaluateMath, parseMathCommand } from "../../lib/math";
 import { IconButton } from "../../ui/components";
-import { Text, TextInput } from "../../ui/Text";
+import { Text, TextInput, type TextInputRef } from "../../ui/Text";
 import { usePalette, useScale } from "../../ui/theme";
 
 const isMathCommand = (text: string) => /^\/math(\s|$)/i.test(text.trim());
@@ -25,7 +25,7 @@ export function Composer({
   const c = usePalette();
   const { s } = useScale();
   const [text, setText] = useState("");
-  const input = useRef<RNTextInput>(null);
+  const input = useRef<TextInputRef>(null);
   const empty = text.trim().length === 0;
 
   const submit = () => {
