@@ -2,7 +2,7 @@ name: Release Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, expo-migration] # TEMP: expo-migration verification builds (no release)
     paths:
       - "mobile/**"
       - ".github/workflows/release-android-apk.yml"
