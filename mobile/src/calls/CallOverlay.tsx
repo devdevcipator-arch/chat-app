@@ -189,16 +189,14 @@ export default function CallOverlay() {
               />
             ) : null}
             {live && st.isVideo ? <RoundButton icon="camera-reverse" color="#ffffff3d" label="Flip" onPress={Calls.switchCamera} /> : null}
-            {/* Also while ringing out, so the speaker is set before they answer. */}
-            {st.phase !== "ended" ? (
-              <RoundButton
-                icon={st.speakerOn ? "volume-high" : "ear"}
-                color={st.speakerOn ? "#fff" : "#ffffff3d"}
-                iconColor={st.speakerOn ? "#000" : "#fff"}
-                label="Speaker"
-                onPress={Calls.toggleSpeaker}
-              />
-            ) : null}
+            {/* Always here, including while ringing out, so the speaker is set before they answer. */}
+            <RoundButton
+              icon={st.speakerOn ? "volume-high" : "ear"}
+              color={st.speakerOn ? "#fff" : "#ffffff3d"}
+              iconColor={st.speakerOn ? "#000" : "#fff"}
+              label="Speaker"
+              onPress={Calls.toggleSpeaker}
+            />
             <RoundButton icon="call" color="#EF4444" label={isGroup ? "Leave" : "End"} onPress={() => void Calls.hangUp()} rotate />
           </View>
         )}
