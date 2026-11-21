@@ -120,6 +120,17 @@ export default function CallOverlay() {
         </View>
         <View style={{ flex: 1 }} />
         {st.phase === "incoming" ? (
+          <View>
+            {/* Choose the loudspeaker before answering; applied as the call connects. */}
+            <View style={[styles.row, { marginBottom: s(28) }]}>
+              <RoundButton
+                icon={st.speakerOn ? "volume-high" : "ear"}
+                color={st.speakerOn ? "#fff" : "#ffffff3d"}
+                iconColor={st.speakerOn ? "#000" : "#fff"}
+                label={st.speakerOn ? "Speaker on" : "Speaker"}
+                onPress={Calls.toggleSpeaker}
+              />
+            </View>
           <View style={styles.row}>
             <RoundButton icon="call" color="#EF4444" label="Decline" onPress={() => void Calls.decline()} rotate large />
             <RoundButton
@@ -129,6 +140,7 @@ export default function CallOverlay() {
               onPress={() => void Calls.accept()}
               large
             />
+          </View>
           </View>
         ) : st.phase === "ended" ? (
           recordingVoicemail ? (
@@ -177,7 +189,8 @@ export default function CallOverlay() {
               />
             ) : null}
             {live && st.isVideo ? <RoundButton icon="camera-reverse" color="#ffffff3d" label="Flip" onPress={Calls.switchCamera} /> : null}
-            {live ? (
+            {/* Also while ringing out, so the speaker is set before they answer. */}
+            {st.phase !== "ended" ? (
               <RoundButton
                 icon={st.speakerOn ? "volume-high" : "ear"}
                 color={st.speakerOn ? "#fff" : "#ffffff3d"}

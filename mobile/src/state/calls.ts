@@ -6,6 +6,7 @@ import { ProfileRepo } from "../data/profiles";
 import { AppError } from "../lib/errors";
 import { storage } from "../lib/storage";
 import { type CallRow, type Profile, profileName } from "../models/types";
+import { useChats } from "./chats";
 import { Realtime } from "./realtime";
 import type * as AgoraModule from "react-native-agora";
 
@@ -67,7 +68,25 @@ const HEARTBEAT = 15_000;
 /** A ringing row older than this is stale (the server treats > 45 s as gone). */
 const STALE_RING = 45_000;
 /** While ringing, re-read the row in case a Realtime event was missed. */
-const RING_POLL = 3_000;
+const RING_POLL = 1_500;
+
+/**
+ * The Agora token for a call that is still ringing, fetched the moment it
+ * starts ringing (both sides), so answering / being answered doesn't wait on
+ * the /api/agora/token round-trip (which can include a server cold start).
+ * The route already allows a party to a *ringing* 1-on-1 call.
+ */
+let prefetched: { callId: string; token: Promise<AgoraToken> } | null = null;
+function prefetchToken(row: CallRow) {
+  if (prefetched?.callId === row.id) return;
+  const token = CallRepo.token(row.chatId);
+  token.catch(() => {}); // connect() retries with a fresh fetch
+  prefetched = { callId: row.id, token };
+  // Load the native Agora module now too, not on the first tap.
+  try {
+    loadAgora();
+  } catch {}
+}
 /** Set by the lock-screen "Accept" action so the call is picked up on launch. */
 export const PENDING_ACCEPT_KEY = "calls.pendingAccept";
 
@@ -92,7 +111,7 @@ let agoraError: string | null = null;
  * idle it also asks the server for a call ringing for me every few seconds
  * (one tiny indexed query: callee_id + status + created_at).
  */
-const RING_WATCH = 4_000;
+const RING_WATCH = 2_500;
 let ringWatch: ReturnType<typeof setInterval> | null = null;
 /** Calls already shown (answered, declined or missed here): never ring twice. */
 const handledCalls = new Set<string>();
@@ -262,18 +281,26 @@ async function onIncoming(row: CallRow) {
   if (row.status !== "ringing" || row.calleeId !== meId) return;
   const age = Date.now() - Date.parse(row.createdAt);
   if (Number.isFinite(age) && age > STALE_RING) return; // rang out long ago
-  const g = ++gen;
-  const caller = await ProfileRepo.fetchPublic(row.callerId).catch(() => null);
-  if (g !== gen || busy() || handledCalls.has(row.id)) return;
-  // Shown once: the poll below must not re-ring a call I already declined or missed.
+  // Shown once: the poll must not re-ring a call I already declined or missed.
   handledCalls.add(row.id);
+  // Ring right away with the caller as my chat list knows them; the fresh
+  // profile (photo / name changes) is filled in a moment later.
+  const known = useChats.getState().chats.find((ch) => ch.chatId === row.chatId)?.other;
+  gen++; // invalidates any older in-flight call work
   fresh({
     call: row,
     chatId: row.chatId,
-    peer: caller ?? { id: row.callerId, username: null, displayName: null, avatarUrl: null },
+    peer: known?.id === row.callerId ? known : { id: row.callerId, username: null, displayName: null, avatarUrl: null },
     isVideo: row.callType === "video",
+    speakerOn: row.callType === "video",
     phase: "incoming",
   });
+  prefetchToken(row);
+  void ProfileRepo.fetchPublic(row.callerId)
+    .then((caller) => {
+      if (caller && get().call?.id === row.id) set({ peer: caller });
+    })
+    .catch(() => {});
   const left = Math.max(5000, RING_TIMEOUT + 5000 - (Number.isFinite(age) ? age : 0));
   pollWhileRinging(row.id);
   incomingTimer = setTimeout(() => {
@@ -301,9 +328,12 @@ async function connect() {
   const g = gen;
   if (!get().groupTitle) set({ phase: "connecting" });
 
+  // Use the token fetched while the call was ringing (falls back to a fresh fetch).
+  const early = prefetched?.callId === row.id ? prefetched.token : null;
+  prefetched = null;
   let token: AgoraToken;
   try {
-    token = await CallRepo.token(chat);
+    token = early ? await early.catch(() => CallRepo.token(chat)) : await CallRepo.token(chat);
   } catch (e) {
     console.warn("Agora token failed", e);
     if (g !== gen) return;
@@ -500,6 +530,7 @@ export const Calls = {
       return;
     }
     set({ call: row, phase: "outgoing" });
+    prefetchToken(row);
     pollWhileRinging(row.id);
     ringTimer = setTimeout(async () => {
       if (get().phase !== "outgoing" || get().call?.id !== row.id) return;
@@ -549,7 +580,8 @@ export const Calls = {
     if (phase !== "incoming" || !row) return;
     const g = ++gen;
     if (incomingTimer) clearTimeout(incomingTimer);
-    set({ phase: "connecting", speakerOn: isVideo });
+    // Keeps the speaker choice made on the ringing screen.
+    set({ phase: "connecting" });
     if (!(await permissions(isVideo))) {
       await CallRepo.answer(row.id, false);
       if (g === gen) {
@@ -558,14 +590,19 @@ export const Calls = {
       }
       return;
     }
-    const answered = await CallRepo.answer(row.id, true);
+    // Answer and join at the same time: the token (fetched while ringing) is
+    // already valid for a ringing call, so joining doesn't wait for the
+    // answer round-trip. If the answer fails, finish() leaves the channel.
+    const answering = CallRepo.answer(row.id, true);
+    const joining = connect();
+    const answered = await answering;
     if (g !== gen) return;
     if (!answered) {
       finish("This call is no longer available.");
       return;
     }
     set({ call: answered });
-    await connect();
+    await joining;
   },
 
   /** "Accept" on the incoming-call notification. */
