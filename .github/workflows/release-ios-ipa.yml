@@ -17,9 +17,11 @@ concurrency:
 
 jobs:
   build-and-release:
-    # Intel image: the arm64 macOS pool (macos-latest) has been too congested
-    # to pick up jobs. macos-13 is retired; macos-15-intel is the Intel option.
-    runs-on: macos-15-intel
+    # Xcode 27 is required: expo-modules-jsi 58.0.23 (built from source by the
+    # "Build ExpoModulesJSI xcframework" phase) fails to compile with Xcode 26.3
+    # (`sending 'slot' risks causing data races`, Swift 6.2). Only the `xcode-27`
+    # image (arm64, GitHub preview) ships Xcode 27; macos-15/26 stop at 26.x.
+    runs-on: xcode-27
     timeout-minutes: 120
     defaults:
       run:
@@ -63,13 +65,17 @@ jobs:
         run: |
           if [ -n "$GOOGLE_SERVICE_INFO_PLIST" ]; then printf '%s' "$GOOGLE_SERVICE_INFO_PLIST" > GoogleService-Info.plist; fi
 
-      # Select the newest Xcode installed on the runner.
-      - name: Select newest Xcode
+      # Use the image's default Xcode 27.x (27.1 today) and refuse anything older,
+      # so a runner image change fails loudly here instead of deep in the build.
+      - name: Check Xcode
         run: |
-          newest=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sed -E 's#.*/Xcode_([0-9.]+)\.app#\1#' | sort -V | tail -1)
-          echo "Selecting Xcode $newest"
-          sudo xcode-select -s "/Applications/Xcode_${newest}.app"
+          ls -d /Applications/Xcode_*.app || true
           xcodebuild -version
+          major=$(xcodebuild -version | head -1 | sed -E 's/^Xcode ([0-9]+).*/\1/')
+          if [ "$major" -lt 27 ]; then
+            echo "::error::Xcode $major is too old for expo-modules-jsi; Xcode 27+ is required."
+            exit 1
+          fi
 
       - name: Install dependencies
         run: |
