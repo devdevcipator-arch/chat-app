@@ -19,6 +19,8 @@ import {
   type MessageRow,
 } from "@/lib/chat";
 import { pageIsActive, playMessageSound, showMessageNotification } from "@/lib/notify";
+import { saveChatList } from "@/lib/chat-cache";
+import { realtimeHub } from "@/lib/realtime";
 import { createClient } from "@/lib/supabase/client";
 import { CallsPanel } from "./calls-panel";
 import { ChatMenu } from "./chat-menu";
@@ -53,6 +55,12 @@ export function ChatSidebar({
     chatsRef.current = chats;
     activeChatRef.current = activeChatId;
   }, [chats, activeChatId]);
+
+  // Snapshot for the instant first paint on the next visit (lib/chat-cache.ts).
+  useEffect(() => {
+    const timer = setTimeout(() => saveChatList(me.id, chats), 300);
+    return () => clearTimeout(timer);
+  }, [me.id, chats]);
 
   /** Sender names for group snippets / notifications, by user id. */
   const names = useRef(new Map<string, string>());
@@ -155,17 +163,16 @@ export function ChatSidebar({
       alertFor(known, message, sender);
     }
 
-    const channel = supabase
-      .channel(`sidebar:${me.id}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (payload) => {
-        void onMessage(payload.new as MessageRow);
-      })
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") void refresh(); // catch up after reconnects
-      });
+    // The app's shared channel (lib/realtime.ts); RLS limits it to my chats.
+    const hub = realtimeHub(supabase);
+    const offInsert = hub.onMessageInsert((message) => void onMessage(message));
+    const offStatus = hub.onStatus((status) => {
+      if (status === "SUBSCRIBED") void refresh(); // catch up after reconnects
+    });
 
     return () => {
-      void supabase.removeChannel(channel);
+      offInsert();
+      offStatus();
     };
   }, [supabase, me.id, refresh, senderName, alertFor, markReadSoon]);
 
@@ -307,6 +314,7 @@ export function ChatSidebar({
             {/* On desktop the gallery and profile live in the rail. */}
             <Link
               href="/gallery"
+              prefetch={true}
               title="My Gallery"
               aria-label="My Gallery"
               className="flex size-9 items-center justify-center rounded-full text-indigo-600 transition hover:bg-indigo-50 md:hidden dark:text-indigo-400 dark:hover:bg-indigo-950/50"
@@ -315,6 +323,7 @@ export function ChatSidebar({
             </Link>
             <Link
               href="/settings/profile"
+              prefetch={true}
               aria-label={`${myName}, @${me.username}: profile and settings`}
               className="flex size-9 items-center justify-center rounded-full md:hidden"
             >
@@ -484,7 +493,7 @@ function ChatList({
   );
 }
 
-function ChatRow({ chat, meId, active }: { chat: ChatSummary; meId: string; active: boolean }) {
+export function ChatRow({ chat, meId, active }: { chat: ChatSummary; meId: string; active: boolean }) {
   const name = chatName(chat);
   const last = chat.lastMessage;
   const group = chat.type === "group";
@@ -504,6 +513,7 @@ function ChatRow({ chat, meId, active }: { chat: ChatSummary; meId: string; acti
     <li className="group/row relative">
       <Link
         href={`/chat/${chat.chatId}`}
+        prefetch={true}
         aria-current={active ? "page" : undefined}
         aria-label={`${name}${unread ? `, ${chat.unreadCount} unread` : ""}${chat.isMuted ? ", muted" : ""}`}
         className={`flex items-center gap-3.5 py-3.5 pr-11 pl-4 transition md:gap-3 md:rounded-lg md:py-2 md:pr-10 md:pl-2 ${

@@ -14,6 +14,9 @@ export function Thumbnail({ item }: { item: GalleryItem }) {
       <img
         src={item.url}
         alt=""
+        // Square grid tiles; the attributes give the browser the aspect ratio up front.
+        width={256}
+        height={256}
         loading="lazy"
         decoding="async"
         onError={() => setFailed(true)}

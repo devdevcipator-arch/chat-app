@@ -1,6 +1,7 @@
-import type { RealtimePostgresChangesPayload, SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import { asCallType, isCallStatus, type CallRow, type CallSignal, type CallType } from "@/lib/call/types";
+import { realtimeHub } from "@/lib/realtime";
 
 // Call signaling over Supabase: RPCs change state (server-validated) and
 // postgres_changes on `calls` deliver every change to both parties.
@@ -34,22 +35,20 @@ export function subscribeToCalls(
   onSignal: (signal: CallSignal) => void,
   onSubscribed: () => void,
 ) {
-  const handle = (payload: RealtimePostgresChangesPayload<CallRow>) => {
-    if (payload.eventType !== "INSERT" && payload.eventType !== "UPDATE") return;
-    const signal = toSignal(meId, payload.eventType, payload.new);
+  // The app's shared channel (lib/realtime.ts), narrowed to calls I'm a party to.
+  const hub = realtimeHub(supabase);
+  const offCall = hub.onCall((event, call) => {
+    if (call.caller_id !== meId && call.callee_id !== meId) return;
+    const signal = toSignal(meId, event, call);
     if (signal) onSignal(signal);
-  };
-
-  const channel = supabase
-    .channel(`calls:${meId}`)
-    .on<CallRow>("postgres_changes", { event: "*", schema: "public", table: "calls", filter: `callee_id=eq.${meId}` }, handle)
-    .on<CallRow>("postgres_changes", { event: "*", schema: "public", table: "calls", filter: `caller_id=eq.${meId}` }, handle)
-    .subscribe((status) => {
-      if (status === "SUBSCRIBED") onSubscribed();
-    });
+  });
+  const offStatus = hub.onStatus((status) => {
+    if (status === "SUBSCRIBED") onSubscribed();
+  });
 
   return () => {
-    void supabase.removeChannel(channel);
+    offCall();
+    offStatus();
   };
 }
 
@@ -106,14 +105,16 @@ export async function fetchGroupCall(supabase: Client, chatId: string): Promise<
 
 /** Fires whenever a call row in this chat changes (group rooms ping it on join/leave). */
 export function subscribeToChatCalls(supabase: Client, chatId: string, onChange: () => void) {
-  const channel = supabase
-    .channel(`chat-calls:${chatId}`)
-    .on("postgres_changes", { event: "*", schema: "public", table: "calls", filter: `chat_id=eq.${chatId}` }, onChange)
-    .subscribe((status) => {
-      if (status === "SUBSCRIBED") onChange();
-    });
+  const hub = realtimeHub(supabase);
+  const offCall = hub.onCall((_event, call) => {
+    if (call.chat_id === chatId) onChange();
+  });
+  const offStatus = hub.onStatus((status) => {
+    if (status === "SUBSCRIBED") onChange();
+  });
   return () => {
-    void supabase.removeChannel(channel);
+    offCall();
+    offStatus();
   };
 }
 

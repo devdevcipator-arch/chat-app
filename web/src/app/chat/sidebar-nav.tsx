@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Avatar } from "@/components/avatar";
+import { clearChatCache } from "@/lib/chat-cache";
 import { signOut } from "./actions";
 
 export type SidebarTab = "chats" | "groups" | "calls";
@@ -105,6 +106,7 @@ export function NavRail({
     >
       <Link
         href="/settings/profile"
+        prefetch={true}
         title="Profile & settings"
         aria-label={`${me.name}, @${me.username}: profile and settings`}
         className="rounded-full ring-2 ring-zinc-300 transition hover:ring-indigo-500 dark:ring-zinc-700"
@@ -148,13 +150,14 @@ export function NavRail({
       <div className="mt-auto flex flex-col items-center gap-3">
         <Link
           href="/gallery"
+          prefetch={true}
           title="My Gallery"
           aria-label="My Gallery"
           className="flex size-10 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-200/80 hover:text-indigo-600 dark:hover:bg-zinc-800/70 dark:hover:text-indigo-400"
         >
           <GalleryIcon className="size-6" />
         </Link>
-        <form action={signOut}>
+        <form action={signOut} onSubmit={clearChatCache}>
           <button
             type="submit"
             title="Sign out"

@@ -14,8 +14,9 @@ export default function GalleryPage() {
 
 // Reads the session (server-side auth check), so it streams in.
 async function GalleryLoader() {
-  await getOnboardedProfile();
-  const [items, chats] = await Promise.all([getMyGallery(), getMyChats()]);
+  // All three in parallel (each read is scoped by RLS / auth.uid()); a
+  // redirect from the profile check still wins.
+  const [, items, chats] = await Promise.all([getOnboardedProfile(), getMyGallery(), getMyChats()]);
   return <GalleryView initialItems={items} initialChats={chats} />;
 }
 

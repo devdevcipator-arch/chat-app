@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getOnboardedProfile } from "@/lib/auth";
 import { getMyChats } from "@/lib/chat-data";
+import { CachedChatList } from "./cached-chat-list";
 import { CallProvider } from "./call/call-provider";
 import { ChatFrame } from "./chat-frame";
 import { ChatSidebar } from "./chat-sidebar";
@@ -30,8 +31,9 @@ export default function ChatLayout({ children }: LayoutProps<"/chat">) {
 // Reads the session, so it streams in behind Suspense. This is also the
 // server-side auth check for every /chat route.
 async function SidebarLoader() {
-  const me = await getOnboardedProfile();
-  const chats = await getMyChats();
+  // In parallel: list_my_chats scopes itself to auth.uid(), so it doesn't
+  // need the profile first (a redirect from the profile check still wins).
+  const [me, chats] = await Promise.all([getOnboardedProfile(), getMyChats()]);
   return <ChatSidebar me={me} initialChats={chats} />;
 }
 
@@ -40,7 +42,8 @@ function SidebarSkeleton() {
     <>
       {/* Same shape as the real sidebar: rail on desktop, tab bar on mobile. */}
       <div className="hidden w-20 shrink-0 border-r border-zinc-200 bg-zinc-100/80 md:block dark:border-zinc-800 dark:bg-zinc-950" />
-      <SidebarListSkeleton />
+      {/* Last known chat list from this browser, else the skeleton. */}
+      <CachedChatList skeleton={<SidebarListSkeleton />} />
       <div className="h-16 shrink-0 border-t border-zinc-200 md:hidden dark:border-zinc-800" />
     </>
   );

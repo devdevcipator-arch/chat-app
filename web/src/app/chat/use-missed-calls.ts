@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { realtimeHub } from "@/lib/realtime";
 import { createClient } from "@/lib/supabase/client";
 
 /** 1-on-1 calls to me that I didn't pick up (shown in red in the Calls list). */
@@ -61,15 +62,18 @@ export function useMissedCalls(meId: string, viewing: boolean) {
       clearTimeout(timer);
       timer = setTimeout(() => void recount(), 400);
     };
-    const channel = supabase
-      .channel(`missed-calls:${meId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "calls", filter: `callee_id=eq.${meId}` }, soon)
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") soon(); // initial count, and catch-up after reconnects
-      });
+    // The app's shared channel (lib/realtime.ts), narrowed to calls to me.
+    const hub = realtimeHub(supabase);
+    const offCall = hub.onCall((_event, call) => {
+      if (call.callee_id === meId) soon();
+    });
+    const offStatus = hub.onStatus((status) => {
+      if (status === "SUBSCRIBED") soon(); // initial count, and catch-up after reconnects
+    });
     return () => {
       clearTimeout(timer);
-      void supabase.removeChannel(channel);
+      offCall();
+      offStatus();
     };
   }, [supabase, meId, recount]);
 

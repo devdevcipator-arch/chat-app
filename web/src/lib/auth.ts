@@ -14,12 +14,19 @@ export type Profile = {
   themePreference: ThemePreference;
 };
 
-/** Verified user + profile. Redirects to /login when signed out. */
-export const getSessionProfile = cache(async (): Promise<Profile> => {
+/** The verified user id (JWT claims, no profile query). Redirects to /login when signed out. */
+export const getSessionUserId = cache(async (): Promise<string> => {
   const supabase = await createClient();
   const { data } = await supabase.auth.getClaims();
   const userId = data?.claims?.sub;
   if (!userId) redirect("/login");
+  return userId;
+});
+
+/** Verified user + profile. Redirects to /login when signed out. */
+export const getSessionProfile = cache(async (): Promise<Profile> => {
+  const userId = await getSessionUserId();
+  const supabase = await createClient();
 
   const { data: profile } = await supabase
     .from("profiles")

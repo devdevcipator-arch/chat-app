@@ -39,6 +39,10 @@ export function Avatar({
         src={url}
         alt=""
         aria-hidden
+        // Square; CSS sets the real size (20–112 px). Long lists load avatars as they scroll in.
+        width={48}
+        height={48}
+        loading="lazy"
         decoding="async"
         onError={() => setFailedUrl(url)}
         className={`shrink-0 rounded-full bg-zinc-200 object-cover dark:bg-zinc-800 ${sizes[size]}`}

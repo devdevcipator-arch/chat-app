@@ -14,6 +14,7 @@ import { AVATAR_INPUT_TYPES, DISPLAY_NAME_MAX, asTheme, normalizeDisplayName, ty
 import { removeAvatar, saveDisplayName, saveThemePreference, uploadAvatar } from "@/lib/profile-client";
 import { createClient } from "@/lib/supabase/client";
 import { signOut } from "@/app/chat/actions";
+import { clearChatCache } from "@/lib/chat-cache";
 
 const errorText = (e: unknown) => (e instanceof UploadError ? e.message : "Something went wrong. Please try again.");
 
@@ -69,6 +70,7 @@ export function ProfileSettings({ me }: { me: Profile & { username: string } }) 
   async function doSignOut() {
     setSigningOut(true);
     try {
+      clearChatCache();
       await signOut(); // clears the session cookie and redirects to /login
     } catch {
       setSigningOut(false);
@@ -141,6 +143,7 @@ export function ProfileSettings({ me }: { me: Profile & { username: string } }) 
         <div className="mx-auto flex h-14 max-w-2xl items-center gap-2 px-3 sm:h-16 sm:gap-3 sm:px-4">
           <Link
             href="/chat"
+            prefetch={true}
             className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             <BackIcon />

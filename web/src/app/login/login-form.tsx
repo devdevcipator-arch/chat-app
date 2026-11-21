@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { AuthCard, FormError, LockBadge, Spinner, buttonClass, inputClass } from "@/components/auth-card";
+import { clearChatCache } from "@/lib/chat-cache";
 import { createClient } from "@/lib/supabase/client";
 import { authErrorMessage } from "@/lib/errors";
 import { OtpInput } from "./otp-input";
@@ -32,6 +33,10 @@ export function LoginForm() {
   const [now, setNow] = useState(0); // set from event handlers / the timer only
 
   const secondsLeft = Math.max(0, Math.ceil((resendAt - now) / 1000));
+
+  // Whoever signs in next must never see the previous account's cached chats
+  // (covers expired sessions too, not just an explicit sign-out).
+  useEffect(() => clearChatCache(), []);
 
   useEffect(() => {
     if (resendAt <= Date.now()) return;

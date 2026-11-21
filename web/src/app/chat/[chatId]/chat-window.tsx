@@ -42,6 +42,8 @@ import { UploadError, compressImage, requestUploadUrl, uploadToR2 } from "@/lib/
 import { ESCAPE_LAYER, escapeIsTaken } from "@/lib/escape";
 import { chatUploadRule, formatLimit, type ChatUploadKind } from "@/lib/chat-upload";
 import { EditError, editMessage } from "@/lib/message-edit";
+import { saveChat } from "@/lib/chat-cache";
+import { realtimeHub } from "@/lib/realtime";
 import { createClient } from "@/lib/supabase/client";
 import { formatBytes } from "@/lib/vault";
 import { markVoicemailPlayed } from "@/lib/voicemail-client";
@@ -134,40 +136,52 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       if (fresh) setDetails(fresh);
     };
 
-    const channel = supabase
-      .channel(`chat:${chatId}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages", filter: `chat_id=eq.${chatId}` },
-        (payload) => {
-          const message = payload.new as MessageRow;
-          setMessages((prev) => mergeMessages(prev, [message]));
-          // Group system messages announce renames and membership changes.
-          if (message.message_type === "system") void reloadDetails();
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "messages", filter: `chat_id=eq.${chatId}` },
-        (payload) => {
-          // e.g. a voicemail was played; only update what we already have.
-          const message = payload.new as MessageRow;
-          setMessages((prev) => (prev.some((m) => m.id === message.id) ? mergeMessages(prev, [message]) : prev));
-        },
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          setConnected(true);
-          void catchUp();
-        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          setConnected(false);
-        }
-      });
+    // The app's shared channel (lib/realtime.ts), narrowed to this chat. It is
+    // usually already joined, so switching chats needs no new channel join.
+    const hub = realtimeHub(supabase);
+    const offInsert = hub.onMessageInsert((message: MessageRow) => {
+      if (message.chat_id !== chatId) return;
+      setMessages((prev) => mergeMessages(prev, [message]));
+      // Group system messages announce renames and membership changes.
+      if (message.message_type === "system") void reloadDetails();
+    });
+    const offUpdate = hub.onMessageUpdate((message: MessageRow) => {
+      if (message.chat_id !== chatId) return;
+      // e.g. a voicemail was played; only update what we already have.
+      setMessages((prev) => (prev.some((m) => m.id === message.id) ? mergeMessages(prev, [message]) : prev));
+    });
+    const offStatus = hub.onStatus((status) => {
+      if (status === "SUBSCRIBED") {
+        setConnected(true);
+        void catchUp();
+      } else {
+        setConnected(false);
+      }
+    });
 
     return () => {
-      void supabase.removeChannel(channel);
+      offInsert();
+      offUpdate();
+      offStatus();
     };
   }, [supabase, chatId]);
+
+  // Snapshot for the instant preview next time this chat opens (lib/chat-cache.ts).
+  const headerName = chatName({ type: details.type, title: details.title, other });
+  useEffect(() => {
+    const timer = setTimeout(
+      () =>
+        saveChat(chatId, {
+          userId: meId,
+          name: headerName,
+          avatarUrl: details.type === "group" ? null : (other?.avatarUrl ?? null),
+          group: details.type === "group",
+          messages,
+        }),
+      300,
+    );
+    return () => clearTimeout(timer);
+  }, [chatId, meId, headerName, details.type, other?.avatarUrl, messages]);
 
   // Actions taken from the sidebar menu or the group info panel.
   useEffect(
