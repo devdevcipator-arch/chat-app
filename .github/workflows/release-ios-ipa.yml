@@ -82,22 +82,70 @@ jobs:
       - name: Generate native iOS project (expo prebuild)
         run: npx expo prebuild --platform ios --clean
 
+      # Full log goes to a file (uploaded below); the job log gets the tail plus
+      # every real error with context. pipefail: a failed build fails the step
+      # (before, `| tail -50` swallowed "BUILD FAILED" and a 524-byte IPA shipped).
       - name: Build iOS app (unsigned)
+        shell: bash
         run: |
+          set -o pipefail
           workspace=$(ls -d ios/*.xcworkspace | head -1)
           scheme=$(basename "$workspace" .xcworkspace)
+          echo "SCHEME=$scheme" >> "$GITHUB_ENV"
+          log="$RUNNER_TEMP/xcodebuild.log"
+          set +e
           xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Release \
             -sdk iphoneos -destination "generic/platform=iOS" \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            build | tail -50
-          echo "SCHEME=$scheme" >> "$GITHUB_ENV"
+            build > "$log" 2>&1
+          status=$?
+          set -e
+          tail -40 "$log"
+          if [ "$status" -ne 0 ]; then
+            echo "::group::Errors from xcodebuild (with context)"
+            grep -n -B3 -A12 -E "error:|\*\* BUILD FAILED|Command PhaseScriptExecution failed" "$log" | head -400 || true
+            echo "::endgroup::"
+            echo "::error::xcodebuild failed (exit $status); see the errors above and the xcodebuild-log artifact."
+            exit "$status"
+          fi
 
+      - name: Upload xcodebuild log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log-${{ github.run_number }}
+          path: ${{ runner.temp }}/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Refuses to ship an empty or partial app: the .app must exist, contain
+      # its executable, and be > 10 MB (a real Expo build is far larger).
       - name: Package chat-app.ipa
+        shell: bash
         run: |
-          app=$(ls -d build/Build/Products/Release-iphoneos/*.app | head -1)
+          set -euo pipefail
+          products=build/Build/Products/Release-iphoneos
+          app=$(find "$products" -maxdepth 1 -type d -name "*.app" 2>/dev/null | head -1)
+          if [ -z "$app" ] || [ ! -d "$app" ]; then
+            echo "::error::No .app bundle under mobile/$products."
+            ls -la "$products" 2>/dev/null || true
+            exit 1
+          fi
+          exe=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$app/Info.plist")
+          if [ ! -f "$app/$exe" ]; then
+            echo "::error::$app has no executable ($exe): the build is incomplete."
+            exit 1
+          fi
+          size_kb=$(du -sk "$app" | cut -f1)
+          echo "App bundle: $app ($((size_kb / 1024)) MB)"
+          if [ "$size_kb" -lt 10240 ]; then
+            echo "::error::$app is only ${size_kb} KB (< 10 MB): refusing to ship an incomplete IPA."
+            exit 1
+          fi
           rm -rf "$RUNNER_TEMP/ipa" && mkdir -p "$RUNNER_TEMP/ipa/Payload"
           cp -R "$app" "$RUNNER_TEMP/ipa/Payload/"
+          rm -f "$GITHUB_WORKSPACE/chat-app.ipa"
           (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/chat-app.ipa" Payload)
           ls -lh "$GITHUB_WORKSPACE/chat-app.ipa"
 
