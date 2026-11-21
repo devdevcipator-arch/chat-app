@@ -1,5 +1,6 @@
+import Constants from "expo-constants";
 import { router } from "expo-router";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ProfileRepo } from "../../data/profiles";
@@ -10,6 +11,7 @@ import { type ThemePreference, avatarImageUrl, profileName } from "../../models/
 import { compressAvatar, pickPhoto } from "../../features/chat/attachments";
 import { PUSH_COMPILED_IN, Push, usePushPref } from "../../services/push";
 import { Auth, useAuth } from "../../state/auth";
+import { Realtime } from "../../state/realtime";
 import { Theme, useThemePref } from "../../state/theme";
 import { Avatar, Button, Icon, IconButton, Spinner, toast } from "../../ui/components";
 import { confirm, showActions } from "../../ui/sheets";
@@ -196,8 +198,22 @@ export default function Settings() {
         <Section title="Account">
           <Button title="Sign Out" icon="log-out-outline" variant="outline" onPress={signOut} style={{ borderColor: c.error }} />
         </Section>
+        <AppStatus />
       </ScrollView>
     </KeyboardAvoidingView>
+  );
+}
+
+/** Build number + live-connection state, so a support question starts with facts. */
+function AppStatus() {
+  const [live, setLive] = useState(Realtime.live);
+  useEffect(() => Realtime.onStatus(setLive), []);
+  const version = Constants.expoConfig?.version ?? "?";
+  const build = Constants.expoConfig?.android?.versionCode ?? Constants.expoConfig?.ios?.buildNumber ?? "?";
+  return (
+    <Text muted style={{ fontSize: 12, textAlign: "center", marginTop: 24 }}>
+      Version {version} (build {String(build)}) · Live updates: {live ? "connected" : "not connected"}
+    </Text>
   );
 }
 

@@ -1,4 +1,4 @@
-import { Alert, Linking, PermissionsAndroid, Platform } from "react-native";
+import { Alert, AppState, Linking, PermissionsAndroid, Platform } from "react-native";
 import { create } from "zustand";
 import { Ringer } from "../calls/ringer";
 import { type AgoraToken, CallRepo, StartCallError } from "../data/calls";
@@ -80,6 +80,22 @@ let incomingTimer: ReturnType<typeof setTimeout> | null = null;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let dismissTimer: ReturnType<typeof setTimeout> | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+/** Agora gave no "joined" within this long: report it instead of spinning forever. */
+const JOIN_TIMEOUT = 20_000;
+let joinTimer: ReturnType<typeof setTimeout> | null = null;
+/** Last error Agora reported for the current call (shown if the call fails). */
+let agoraError: string | null = null;
+
+/**
+ * Incoming calls are normally pushed over Realtime, but a dropped or not-yet-
+ * authorized socket must never mean a silent phone. While the app is open and
+ * idle it also asks the server for a call ringing for me every few seconds
+ * (one tiny indexed query: callee_id + status + created_at).
+ */
+const RING_WATCH = 4_000;
+let ringWatch: ReturnType<typeof setInterval> | null = null;
+/** Calls already shown (answered, declined or missed here): never ring twice. */
+const handledCalls = new Set<string>();
 
 /** The Agora module, loaded on first use (never at app startup). */
 let agora: typeof AgoraModule | null = null;
@@ -100,9 +116,9 @@ const busy = () => {
 const title = () => get().groupTitle ?? profileName(get().peer);
 
 function clearTimers() {
-  for (const t of [ringTimer, incomingTimer, dismissTimer]) if (t) clearTimeout(t);
+  for (const t of [ringTimer, incomingTimer, dismissTimer, joinTimer]) if (t) clearTimeout(t);
   for (const t of [heartbeatTimer, pollTimer]) if (t) clearInterval(t);
-  ringTimer = incomingTimer = dismissTimer = heartbeatTimer = pollTimer = null;
+  ringTimer = incomingTimer = dismissTimer = joinTimer = heartbeatTimer = pollTimer = null;
 }
 
 /**
@@ -242,13 +258,15 @@ function onCallChange(event: "INSERT" | "UPDATE", row: CallRow) {
 }
 
 async function onIncoming(row: CallRow) {
-  if (busy() || get().call?.id === row.id) return;
+  if (busy() || get().call?.id === row.id || handledCalls.has(row.id)) return;
   if (row.status !== "ringing" || row.calleeId !== meId) return;
   const age = Date.now() - Date.parse(row.createdAt);
   if (Number.isFinite(age) && age > STALE_RING) return; // rang out long ago
   const g = ++gen;
   const caller = await ProfileRepo.fetchPublic(row.callerId).catch(() => null);
-  if (g !== gen || busy()) return;
+  if (g !== gen || busy() || handledCalls.has(row.id)) return;
+  // Shown once: the poll below must not re-ring a call I already declined or missed.
+  handledCalls.add(row.id);
   fresh({
     call: row,
     chatId: row.chatId,
@@ -287,12 +305,14 @@ async function connect() {
   try {
     token = await CallRepo.token(chat);
   } catch (e) {
+    console.warn("Agora token failed", e);
     if (g !== gen) return;
     await CallRepo.end(row.id);
-    finish(e instanceof AppError ? e.message : "Couldn't connect the call.");
+    finish(e instanceof AppError ? `Couldn't connect the call: ${e.message}` : "Couldn't connect the call (token).");
     return;
   }
   if (g !== gen) return;
+  agoraError = null;
 
   const A = loadAgora();
   const rtc = A.createAgoraRtcEngine();
@@ -306,8 +326,15 @@ async function connect() {
   try {
     rtc.initialize({ appId: token.appId, channelProfile: A.ChannelProfileType.ChannelProfileCommunication });
     rtc.registerEventHandler({
+      onError: (err, msg) => {
+        if (!mine()) return;
+        agoraError = `${err}${msg ? ` ${msg}` : ""}`;
+        console.warn("Agora error", err, msg);
+      },
       onJoinChannelSuccess: () => {
         if (!mine()) return;
+        if (joinTimer) clearTimeout(joinTimer);
+        joinTimer = null;
         set({ connectedAt: Date.now(), ...(get().groupTitle ? {} : { phase: "active" as const }) });
         // The audio route can only be switched once in the channel.
         try {
@@ -341,12 +368,13 @@ async function connect() {
           })
           .catch(() => {});
       },
-      onConnectionStateChanged: (_connection, state) => {
+      onConnectionStateChanged: (_connection, state, reason) => {
         if (!mine()) return;
         set({ reconnecting: state === A.ConnectionStateType.ConnectionStateReconnecting });
         if (state === A.ConnectionStateType.ConnectionStateFailed) {
           void CallRepo.end(row.id);
-          finish("Connection lost.");
+          // e.g. reason 8 = invalid token, 9 = token expired, 4 = rejected by server.
+          finish(`Connection lost (Agora reason ${reason}${agoraError ? `, error ${agoraError}` : ""}).`);
         }
       },
     });
@@ -375,13 +403,27 @@ async function connect() {
       autoSubscribeAudio: true,
       autoSubscribeVideo: true,
     });
-    if (typeof code === "number" && code < 0) throw new Error(`joinChannelWithUserAccount failed (${code})`);
+    if (typeof code === "number" && code < 0) throw new Error(`join returned ${code}`);
+    // Never spin on "Connecting…" forever: say what Agora reported.
+    joinTimer = setTimeout(() => {
+      joinTimer = null;
+      if (!mine() || get().connectedAt) return;
+      void CallRepo.end(row.id);
+      finish(`Couldn't connect the call (no answer from the call server${agoraError ? `, error ${agoraError}` : ""}).`);
+    }, JOIN_TIMEOUT);
   } catch (e) {
     console.warn("Agora join failed", e);
     if (g !== gen) return;
     await CallRepo.end(row.id);
-    finish("Couldn't connect the call.");
+    finish(`Couldn't connect the call (${e instanceof Error ? e.message : String(e)}).`);
   }
+}
+
+function startRingWatch() {
+  if (ringWatch) clearInterval(ringWatch);
+  ringWatch = setInterval(() => {
+    if (AppState.currentState === "active") void Calls.checkRinging();
+  }, RING_WATCH);
 }
 
 export const Calls = {
@@ -390,7 +432,16 @@ export const Calls = {
     if (meId === userId) return;
     await Calls.detach();
     meId = userId;
-    unsubscribe = Realtime.onCall(onCallChange);
+    const offCall = Realtime.onCall(onCallChange);
+    // (Re)connected: anything that rang while the socket was down shows now.
+    const offStatus = Realtime.onStatus((live) => {
+      if (live) void Calls.checkRinging();
+    });
+    unsubscribe = () => {
+      offCall();
+      offStatus();
+    };
+    startRingWatch();
     const ringing = await CallRepo.ringingForMe(userId);
     if (ringing && meId === userId) void onIncoming(ringing);
   },
@@ -401,6 +452,9 @@ export const Calls = {
     resetToIdle();
     unsubscribe?.();
     unsubscribe = null;
+    if (ringWatch) clearInterval(ringWatch);
+    ringWatch = null;
+    handledCalls.clear();
     meId = null;
   },
 

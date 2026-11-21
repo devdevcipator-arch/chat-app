@@ -13,6 +13,7 @@ import { Calls, useCall } from "../../../state/calls";
 import { useChats } from "../../../state/chats";
 import { MissedCalls, useMissedCalls } from "../../../state/missedCalls";
 import { Network } from "../../../state/network";
+import { Realtime } from "../../../state/realtime";
 import { Avatar, Button, Divider, Icon, IconButton, OfflineBanner, Spinner, toast } from "../../../ui/components";
 import { Text } from "../../../ui/Text";
 import { usePalette, useScale } from "../../../ui/theme";
@@ -123,6 +124,20 @@ export default function CallsTab() {
   useEffect(() => {
     if (phase === "idle" || phase === "ended") void load();
   }, [phase, load]);
+
+  // ...and when any of my call rows changes (someone else's ringing call
+  // ends), so a finished call never stays "Ongoing" in the list.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const off = Realtime.onCall(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void load(), 600);
+    });
+    return () => {
+      clearTimeout(timer);
+      off();
+    };
+  }, [load]);
 
   const logs = useMemo(() => {
     try {

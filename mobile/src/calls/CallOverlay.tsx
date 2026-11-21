@@ -45,6 +45,8 @@ export default function CallOverlay() {
       case "group": {
         if (st.reconnecting) return "Reconnecting…";
         if (!st.connectedAt) return isGroup ? "Joining…" : "Connecting…";
+        // Joined, but the other side's audio hasn't arrived yet.
+        if (!isGroup && st.remotes.length === 0) return `Waiting for ${title}…`;
         const elapsed = formatDuration((Date.now() - st.connectedAt) / 1000);
         return isGroup ? `${elapsed} · ${st.remotes.length + 1} in call` : elapsed;
       }
