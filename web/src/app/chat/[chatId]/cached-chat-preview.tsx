@@ -5,6 +5,7 @@ import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { Avatar } from "@/components/avatar";
 import { messageSnippet } from "@/lib/chat";
 import { useCachedChat } from "@/lib/chat-cache";
+import { EarlyComposer } from "./early-composer";
 
 /**
  * Shown the instant a conversation opens, while its server render streams in:
@@ -58,7 +59,7 @@ export function CachedChatPreview({ skeleton }: { skeleton: ReactNode }) {
           })}
         </ul>
       </div>
-      <div className="h-16 shrink-0 border-t border-zinc-200 pb-[env(safe-area-inset-bottom)] dark:border-zinc-800" aria-hidden />
+      <EarlyComposer />
     </section>
   );
 }

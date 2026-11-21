@@ -58,6 +58,7 @@ import { MathResultCard } from "./math-result-card";
 import { AudioMessage, FileMessage, ImageMessage, Lightbox, VideoMessage } from "./media";
 import { VOICE_NOTE_MAX_SECONDS, VoiceNoteBar } from "./voice-note-bar";
 import { VoicemailMessage } from "./voicemail-message";
+import { clearEarlyDraft, readEarlyDraft } from "./early-composer";
 import type { RecordedAudio } from "@/lib/audio-recorder";
 
 type Props = {
@@ -87,6 +88,11 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
   const [supabase] = useState(createClient);
   const [messages, setMessages] = useState(initialMessages);
   const [details, setDetails] = useState(initialDetails);
+  // Whatever was typed while the chat loaded (EarlyComposer); taken once.
+  const [earlyDraft] = useState(() => readEarlyDraft(chatId));
+  useEffect(() => {
+    clearEarlyDraft(chatId);
+  }, [chatId]);
   const [infoOpen, setInfoOpen] = useState(false);
   const closeInfo = useCallback(() => setInfoOpen(false), []);
   const group = details.type === "group";
@@ -625,6 +631,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       </AnimatePresence>
 
       <Composer
+        initialText={earlyDraft}
         onSend={handleSendText}
         onSendMath={handleSendMath}
         onAttach={(file) => void handleAttach(file)}
@@ -890,6 +897,7 @@ function namePasted(file: File) {
 }
 
 function Composer({
+  initialText,
   onSend,
   onSendMath,
   onAttach,
@@ -901,6 +909,8 @@ function Composer({
   onSaveEdit,
   onCancelEdit,
 }: {
+  /** Text typed into the EarlyComposer while the chat was loading. */
+  initialText: string;
   onSend: (content: string) => void;
   /** A valid `/math` command, already evaluated. */
   onSendMath: (expression: string, formatted: string) => void;
@@ -916,10 +926,16 @@ function Composer({
   onSaveEdit: (content: string) => void;
   onCancelEdit: () => void;
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialText);
   const [recording, setRecording] = useState(false);
   const stopRecording = useCallback(() => setRecording(false), []);
   const input = useRef<HTMLTextAreaElement>(null);
+
+  // Carried-over early draft: keep typing where you left off.
+  useLayoutEffect(() => {
+    const el = input.current;
+    if (el && el.value) el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
 
   // Entering / leaving editing mode swaps the input's text (adjusted during
   // render, not in an effect). Any unsent draft comes back afterwards.

@@ -5,6 +5,7 @@ import { UUID_PATTERN } from "@/lib/chat";
 import { getChat } from "@/lib/chat-data";
 import { CachedChatPreview } from "./cached-chat-preview";
 import { ChatWindow } from "./chat-window";
+import { EarlyComposer } from "./early-composer";
 
 export default function ChatPage({ params }: PageProps<"/chat/[chatId]">) {
   return (
@@ -49,13 +50,14 @@ async function ChatLoader({ params }: Pick<PageProps<"/chat/[chatId]">, "params"
 
 function ChatWindowSkeleton() {
   return (
-    <div className="flex flex-1 animate-pulse flex-col">
-      <div className="flex h-16 items-center gap-3 border-b border-zinc-200 px-4 dark:border-zinc-800">
+    <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex h-16 animate-pulse items-center gap-3 border-b border-zinc-200 px-4 dark:border-zinc-800">
         <div className="size-10 rounded-full bg-zinc-200 dark:bg-zinc-800" />
         <div className="h-3 w-32 rounded bg-zinc-200 dark:bg-zinc-800" />
       </div>
       <div className="flex-1" />
-      <div className="h-16 border-t border-zinc-200 dark:border-zinc-800" />
+      {/* The message bar is usable right away; its draft carries over to the live one. */}
+      <EarlyComposer />
     </div>
   );
 }
