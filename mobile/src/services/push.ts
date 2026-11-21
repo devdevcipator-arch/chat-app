@@ -10,10 +10,12 @@ import { supabase } from "../lib/supabase";
  * has a google-services.json (see app.config.ts / react-native.config.js);
  * otherwise this whole module is a no-op and the app is smaller.
  *
- * Backend contract (NOT yet present in the live database; writes fail
- * silently until it is):
- *   - table  user_push_tokens(user_id uuid, token text unique, platform text, updated_at timestamptz)
- *   - column profiles.push_notifications_enabled boolean
+ * Backend contract (supabase/migrations/20261119120000_push_tokens_and_prefs.sql):
+ *   - rpc    register_push_token(p_token text, p_platform 'android'|'ios'|'web'):
+ *            upserts (user_id, token) for me and takes the token away from any
+ *            other account that had this device before (security definer)
+ *   - table  user_push_tokens, unique (user_id, token); RLS lets me delete my own rows
+ *   - column profiles.push_notifications_enabled boolean (I may update my own)
  *   - a sender that posts FCM data messages:
  *       { type: "call", call_id, chat_id, caller_name, call_type: "voice"|"video" }
  *       { type: "message", chat_id, title, body }
@@ -48,28 +50,35 @@ async function requestOsPermission(m: Messaging): Promise<boolean> {
   return status === m.AuthorizationStatus.AUTHORIZED || status === m.AuthorizationStatus.PROVISIONAL;
 }
 
-/** Best-effort server writes: tolerate the table/column not existing yet. */
-async function saveToken(userId: string, token: string) {
-  await supabase
-    .from("user_push_tokens" as never)
-    .upsert({ user_id: userId, token, platform: Platform.OS, updated_at: new Date().toISOString() } as never, {
-      onConflict: "token",
-    })
-    .then(
-      () => {},
-      () => {},
-    );
+/**
+ * Registers this device for the signed-in user via the register_push_token
+ * RPC. It upserts on (user_id, token) server-side and moves the token off any
+ * account that used this device before, which a direct table write can't do
+ * under RLS. Best-effort: a failure just means no remote pushes until the next
+ * launch / token refresh retries it.
+ */
+async function saveToken(token: string) {
+  const platform = Platform.OS === "ios" ? "ios" : Platform.OS === "android" ? "android" : null;
+  if (!platform) return;
+  try {
+    const { error } = await supabase.rpc("register_push_token", { p_token: token, p_platform: platform });
+    if (error) console.warn("register_push_token failed", error.message);
+  } catch (e) {
+    console.warn("register_push_token failed", e);
+  }
 }
 
+/**
+ * Removes this device's token row. Must run while still signed in: RLS only
+ * lets me delete my own rows, so after sign-out the delete would match nothing.
+ */
 async function deleteToken(token: string) {
-  await supabase
-    .from("user_push_tokens" as never)
-    .delete()
-    .eq("token", token)
-    .then(
-      () => {},
-      () => {},
-    );
+  try {
+    const { error } = await supabase.from("user_push_tokens").delete().eq("token", token);
+    if (error) console.warn("Removing push token failed", error.message);
+  } catch (e) {
+    console.warn("Removing push token failed", e);
+  }
 }
 
 async function saveProfileFlag(userId: string, enabled: boolean) {
@@ -85,19 +94,26 @@ async function saveProfileFlag(userId: string, enabled: boolean) {
 
 let unsubscribeRefresh: (() => void) | null = null;
 
-async function register(userId: string) {
+async function register() {
   const m = messagingModule();
   if (!m) return;
   try {
     if (!(await requestOsPermission(m))) return;
     const messaging = m.getMessaging();
     const token = await m.getToken(messaging);
+    // FCM rotated the token since last time: drop the stale row first.
+    const previous = storage.getString(TOKEN_KEY);
+    if (previous && previous !== token) await deleteToken(previous);
     storage.set(TOKEN_KEY, token);
-    await saveToken(userId, token);
+    await saveToken(token);
     unsubscribeRefresh?.();
     unsubscribeRefresh = m.onTokenRefresh(messaging, (next) => {
+      const old = storage.getString(TOKEN_KEY);
       storage.set(TOKEN_KEY, next);
-      void saveToken(userId, next);
+      void (async () => {
+        if (old && old !== next) await deleteToken(old);
+        await saveToken(next);
+      })();
     });
     const { ensureCallChannel } = await import("./callNotifications");
     await ensureCallChannel();
@@ -106,22 +122,31 @@ async function register(userId: string) {
   }
 }
 
+/** Forgets this device: server row first (needs the session), then the FCM token. */
 async function unregister() {
   unsubscribeRefresh?.();
   unsubscribeRefresh = null;
   const token = storage.getString(TOKEN_KEY);
-  storage.remove(TOKEN_KEY);
   if (token) await deleteToken(token);
+  storage.remove(TOKEN_KEY);
   const m = messagingModule();
   if (m) await m.deleteToken(m.getMessaging()).catch(() => {});
 }
 
 export const Push = {
-  async attach(userId: string) {
-    if (usePushPref.getState().enabled) await register(userId);
+  async attach(_userId: string) {
+    if (usePushPref.getState().enabled) await register();
   },
 
-  /** Signing out: this device stops receiving this account's pushes. */
+  /**
+   * Called by Auth.signOut *before* the session is cleared, so the token row
+   * can still be deleted under RLS (afterwards the delete would match nothing).
+   */
+  async beforeSignOut() {
+    await unregister();
+  },
+
+  /** Signed out (or the session ended): stop token refresh and drop the local token. */
   async detach() {
     await unregister();
   },
@@ -130,7 +155,7 @@ export const Push = {
     storage.set(PREF_KEY, enabled);
     usePushPref.setState({ enabled });
     await saveProfileFlag(userId, enabled);
-    if (enabled) await register(userId);
+    if (enabled) await register();
     else await unregister();
   },
 };

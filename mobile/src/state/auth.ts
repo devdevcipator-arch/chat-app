@@ -5,6 +5,7 @@ import { dbErrorMessage, isOfflineError } from "../lib/errors";
 import { AUTH_STORAGE_KEY, storedUser, supabase } from "../lib/supabase";
 import { removeKey } from "../lib/storage";
 import type { Profile } from "../models/types";
+import { Push } from "../services/push";
 import { Network } from "./network";
 import { Theme } from "./theme";
 
@@ -164,6 +165,9 @@ export const Auth = {
    * session when the server can't be reached, so it is removed by hand then.
    */
   async signOut() {
+    // Remove this device's push token while the session can still delete it
+    // (RLS: own rows only). Capped so an offline sign-out never hangs on it.
+    await Promise.race([Push.beforeSignOut().catch(() => {}), new Promise((r) => setTimeout(r, 4000))]);
     const { error } = await supabase.auth.signOut({ scope: "local" }).catch((e: unknown) => ({ error: e }));
     if (error) {
       removeKey(AUTH_STORAGE_KEY);
