@@ -3,7 +3,7 @@ import { FlashList } from "@shopify/flash-list";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { useCallback, useEffect, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
+import { Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Cache } from "../../../data/cache";
 import { CallRepo } from "../../../data/calls";
@@ -58,6 +58,7 @@ export default function ChatScreen() {
   const [synced, setSynced] = useState(false);
   const [live, setLive] = useState(Realtime.live);
   const [recording, setRecording] = useState(false);
+  const keyboardOpen = useKeyboardOpen();
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [groupCall, setGroupCall] = useState<ActiveGroupCall | null>(null);
   const inCallId = useCall((st) => st.call?.id ?? null);
@@ -426,7 +427,8 @@ export default function ChatScreen() {
           )}
         </View>
 
-        <View style={{ paddingBottom: insets.bottom }}>
+        {/* Above the Android nav / gesture bar; the keyboard covers that bar when open. */}
+        <View style={{ paddingBottom: keyboardOpen ? 6 : Math.max(insets.bottom, 8) }}>
           {recording ? (
             <VoiceRecorder
               onCancel={() => setRecording(false)}
@@ -449,6 +451,20 @@ export default function ChatScreen() {
       <GalleryPicker visible={galleryOpen} onClose={() => setGalleryOpen(false)} onPick={forwardFromGallery} />
     </>
   );
+}
+
+/** Whether the software keyboard is showing. */
+function useKeyboardOpen() {
+  const [open, setOpen] = useState(() => Keyboard.isVisible());
+  useEffect(() => {
+    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () => setOpen(true));
+    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setOpen(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return open;
 }
 
 const styles = StyleSheet.create({

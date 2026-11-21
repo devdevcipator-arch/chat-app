@@ -15,6 +15,9 @@ export default function TabsLayout() {
   const chats = useChats((st) => st.chats);
   const openChatId = useChats((st) => st.openChatId);
   const missed = useMissedCalls((st) => st.count);
+  // Sit fully above Android's 3-button bar / gesture pill (and the iOS home
+  // indicator), never touching it, even on devices that report a 0 inset.
+  const bottom = Math.max(insets.bottom, 10);
 
   const allUnread = unreadOf(chats, openChatId);
   const groupUnread = unreadOf(
@@ -31,8 +34,10 @@ export default function TabsLayout() {
         tabBarStyle: {
           backgroundColor: c.bg,
           borderTopColor: c.border,
-          height: s(58) + insets.bottom,
+          height: s(58) + bottom,
           paddingTop: 6,
+          // Overrides the bar's own inset padding, so it's applied exactly once.
+          paddingBottom: bottom,
         },
         tabBarLabelStyle: { fontSize: 11.5, fontWeight: "600" },
         tabBarAllowFontScaling: false,

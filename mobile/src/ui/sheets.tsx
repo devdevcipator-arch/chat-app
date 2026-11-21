@@ -66,9 +66,9 @@ export function SheetHost() {
 
   return (
     <>
-      <Modal visible={!!sheet} transparent animationType="fade" onRequestClose={close} statusBarTranslucent>
+      <Modal visible={!!sheet} transparent animationType="fade" onRequestClose={close} statusBarTranslucent navigationBarTranslucent>
         <Pressable style={[styles.backdrop, { backgroundColor: c.overlay }]} onPress={close} accessibilityLabel="Close">
-          <Pressable style={[styles.sheet, { backgroundColor: c.surface, paddingBottom: insets.bottom + 8 }]}>
+          <Pressable style={[styles.sheet, { backgroundColor: c.surface, paddingBottom: Math.max(insets.bottom, 10) + 8 }]}>
             <View style={[styles.handle, { backgroundColor: c.surfaceHighest }]} />
             {sheet?.title ? (
               <View style={styles.sheetHeader}>
@@ -118,8 +118,8 @@ function PromptModal({ state }: { state: PromptState }) {
     usePrompt.setState({ prompt: null });
   };
   return (
-    <Modal visible={!!state} transparent animationType="fade" onRequestClose={() => done(null)} statusBarTranslucent>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={[styles.center, { backgroundColor: c.overlay }]}>
+    <Modal visible={!!state} transparent animationType="fade" onRequestClose={() => done(null)} statusBarTranslucent navigationBarTranslucent>
+      <KeyboardAvoidingView behavior="padding" style={[styles.center, { backgroundColor: c.overlay }]}>
         <View style={[styles.dialog, { backgroundColor: c.surface }]}>
           <Text style={{ fontSize: 18, fontWeight: "600", marginBottom: 12 }}>{state?.title}</Text>
           <TextInput

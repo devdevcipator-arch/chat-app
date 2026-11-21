@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BackHandler, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { Modal, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { formatDuration } from "../lib/media";
 import { avatarImageUrl, profileName } from "../models/types";
@@ -25,15 +25,6 @@ export default function CallOverlay() {
     return () => clearInterval(t);
   }, []);
 
-  // Back button never drops a live call; it only closes the "ended" screen.
-  useEffect(() => {
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (useCall.getState().phase === "ended") Calls.dismiss();
-      return true;
-    });
-    return () => sub.remove();
-  }, []);
-
   if (st.phase === "idle") return null;
   const isGroup = !!st.groupTitle;
   const title = isGroup ? st.groupTitle! : profileName(st.peer);
@@ -47,7 +38,7 @@ export default function CallOverlay() {
       case "outgoing":
         return "Ringing…";
       case "incoming":
-        return `Incoming ${st.isVideo ? "video" : "voice"} call`;
+        return `Incoming ${st.isVideo ? "Video" : "Voice"} Call`;
       case "connecting":
         return "Connecting…";
       case "active":
@@ -84,7 +75,18 @@ export default function CallOverlay() {
     Calls.dismiss();
   };
 
+  // A native Modal is its own window: above every route, sheet and keyboard.
+  // The back button never drops a live call; it only closes the "ended" screen.
   return (
+    <Modal
+      visible
+      animationType="fade"
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={() => {
+        if (useCall.getState().phase === "ended") Calls.dismiss();
+      }}
+    >
     <View style={[StyleSheet.absoluteFill, styles.root]} accessibilityViewIsModal>
       {showVideo ? <VideoStage /> : null}
       <View style={{ flex: 1, paddingTop: insets.top + s(32), paddingBottom: insets.bottom + s(28) }}>
@@ -117,8 +119,14 @@ export default function CallOverlay() {
         <View style={{ flex: 1 }} />
         {st.phase === "incoming" ? (
           <View style={styles.row}>
-            <RoundButton icon="call" color="#EF4444" label="Decline" onPress={Calls.decline} rotate />
-            <RoundButton icon={st.isVideo ? "videocam" : "call"} color="#22C55E" label="Accept" onPress={Calls.accept} />
+            <RoundButton icon="call" color="#EF4444" label="Decline" onPress={() => void Calls.decline()} rotate large />
+            <RoundButton
+              icon={st.isVideo ? "videocam" : "call"}
+              color="#22C55E"
+              label="Accept"
+              onPress={() => void Calls.accept()}
+              large
+            />
           </View>
         ) : st.phase === "ended" ? (
           recordingVoicemail ? (
@@ -181,6 +189,7 @@ export default function CallOverlay() {
         )}
       </View>
     </View>
+    </Modal>
   );
 }
 
@@ -240,6 +249,7 @@ function RoundButton({
   onPress,
   iconColor = "#fff",
   rotate,
+  large,
 }: {
   icon: IconName;
   color: string;
@@ -247,20 +257,28 @@ function RoundButton({
   onPress: () => void;
   iconColor?: string;
   rotate?: boolean;
+  /** Accept / Decline: bigger, unmistakable targets. */
+  large?: boolean;
 }) {
+  const size = large ? 76 : 64;
   return (
-    <View style={{ alignItems: "center", width: 76 }}>
+    <View style={{ alignItems: "center", width: large ? 110 : 76 }}>
       <Pressable
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel={label}
-        style={({ pressed }) => [styles.round, { backgroundColor: color, opacity: pressed ? 0.8 : 1 }]}
+        style={({ pressed }) => [
+          styles.round,
+          { width: size, height: size, borderRadius: size / 2, backgroundColor: color, opacity: pressed ? 0.8 : 1 },
+        ]}
       >
         <View style={rotate ? { transform: [{ rotate: "135deg" }] } : undefined}>
-          <Icon name={icon} size={28} color={iconColor} />
+          <Icon name={icon} size={large ? 34 : 28} color={iconColor} />
         </View>
       </Pressable>
-      <Text style={{ color: "#ffffffb3", fontSize: 12, marginTop: 6 }}>{label}</Text>
+      <Text style={{ color: large ? "#fff" : "#ffffffb3", fontSize: large ? 15 : 12, fontWeight: large ? "600" : "400", marginTop: 8 }}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -269,7 +287,7 @@ const styles = StyleSheet.create({
   root: { backgroundColor: "#0A0A0A", zIndex: 100, elevation: 100 },
   row: { flexDirection: "row", justifyContent: "space-evenly", alignItems: "center", paddingHorizontal: 12 },
   people: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 16, marginTop: 24 },
-  round: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center" },
+  round: { alignItems: "center", justifyContent: "center" },
   tileOff: { alignItems: "center", justifyContent: "center", backgroundColor: "#1F1F1F" },
   pip: { position: "absolute", right: 16, bottom: 150, borderRadius: 12, overflow: "hidden", backgroundColor: "#1F1F1F" },
   grid: { flexDirection: "row", flexWrap: "wrap", paddingTop: 140, paddingHorizontal: 2, alignContent: "flex-start" },

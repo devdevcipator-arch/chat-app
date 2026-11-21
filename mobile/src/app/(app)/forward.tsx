@@ -70,7 +70,7 @@ export default function Forward() {
           </Text>
         }
       />
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 12, borderTopColor: c.border }]}>
+      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) + 12, borderTopColor: c.border }]}>
         <Button
           title={selected ? `Send to ${chatName(selected)}` : "Select a chat"}
           icon="send"

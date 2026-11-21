@@ -1,7 +1,7 @@
 import { FlashList } from "@shopify/flash-list";
 import { Image } from "expo-image";
 import { memo, useEffect, useState } from "react";
-import { Modal, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { Modal, Platform, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Cache } from "../../data/cache";
 import { GalleryRepo } from "../../data/gallery";
@@ -100,8 +100,13 @@ export function GalleryPicker({ visible, onClose, onPick }: { visible: boolean; 
   const size = Math.floor((width - 24 - (columns - 1) * 8) / columns);
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: 8 }}>
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}
+      presentationStyle="pageSheet"
+      statusBarTranslucent
+      navigationBarTranslucent
+    >
+      {/* Android draws the full-screen modal under the system bars: pad for them. */}
+      <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: Platform.OS === "android" ? Math.max(insets.top, 12) + 8 : 8 }}>
         <View style={styles.header}>
           <Text style={{ fontSize: 18, fontWeight: "600", flex: 1 }}>From my Gallery</Text>
           <IconButton name="close" label="Close" onPress={onClose} />
@@ -119,7 +124,7 @@ export function GalleryPicker({ visible, onClose, onPick }: { visible: boolean; 
             data={items}
             numColumns={columns}
             keyExtractor={(i) => i.id}
-            contentContainerStyle={{ padding: 12, paddingBottom: insets.bottom + 12 }}
+            contentContainerStyle={{ padding: 12, paddingBottom: Math.max(insets.bottom, 10) + 12 }}
             renderItem={({ item }) => (
               <View style={{ padding: 4 }}>
                 <GalleryThumb item={item} size={size - 8} onPress={() => onPick(item)} />

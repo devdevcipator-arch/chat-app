@@ -158,10 +158,10 @@ export default function CallsTab() {
     return (
       <Pressable
         onPress={() => openChat(log.chatId)}
-        style={({ pressed }) => [styles.row, { paddingHorizontal: s(16), paddingVertical: s(10) }, pressed && { backgroundColor: c.surface }]}
+        style={({ pressed }) => [styles.row, { paddingHorizontal: s(16), paddingVertical: 13 }, pressed && { backgroundColor: c.surface }]}
         accessibilityLabel={`${name}, ${status}, ${formatDateTime(log.createdAt)}`}
       >
-        <Avatar name={name} uri={log.isGroup ? null : avatarImageUrl(log.peer)} group={log.isGroup} size={s(48)} />
+        <Avatar name={name} uri={log.isGroup ? null : avatarImageUrl(log.peer)} group={log.isGroup} size={48} />
         <View style={{ flex: 1, marginLeft: s(14), minWidth: 0 }}>
           <Text style={{ fontSize: 16, fontWeight: "500", color: bad ? c.error : c.text }} numberOfLines={1}>
             {name}

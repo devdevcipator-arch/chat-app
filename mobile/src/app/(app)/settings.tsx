@@ -180,7 +180,7 @@ export default function Settings() {
               <Text muted style={{ fontSize: 12.5, marginTop: 2 }}>
                 {PUSH_COMPILED_IN
                   ? "New messages and incoming calls, even when the app is closed."
-                  : "Saved to your account. Delivery isn't enabled in this build yet."}
+                  : "New messages and incoming calls while the app is open or in the background."}
               </Text>
             </View>
             <Switch

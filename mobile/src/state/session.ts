@@ -1,4 +1,6 @@
 import { AppState } from "react-native";
+import { supabase } from "../lib/supabase";
+import { LocalNotifications } from "../services/localNotifications";
 import { Push } from "../services/push";
 import { Auth, useAuth } from "./auth";
 import { Calls } from "./calls";
@@ -21,9 +23,11 @@ function apply(userId: string | null) {
     MissedCalls.attach(userId);
     Realtime.attach(userId);
     void Calls.attach(userId);
+    void LocalNotifications.attach(userId);
     void Push.attach(userId);
   } else {
     void Push.detach();
+    LocalNotifications.detach();
     void Calls.detach();
     Realtime.detach();
     MissedCalls.detach();
@@ -43,6 +47,10 @@ export function startSession() {
   Auth.start();
   apply(useAuth.getState().userId);
   Auth.onAccountChange(apply);
+
+  // Every new access token goes onto the Realtime socket too, so RLS keeps
+  // delivering this user's rows after a refresh (and after an offline launch).
+  supabase.auth.onAuthStateChange((_event, session) => Realtime.setToken(session?.access_token));
 
   Network.onReconnect(() => {
     if (!attachedUser) return;

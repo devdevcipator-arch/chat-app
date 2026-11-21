@@ -38,7 +38,7 @@ export function TabHeader({ title, action }: { title: string; action?: ReactNode
   const insets = useSafeAreaInsets();
   const me = useAuth((st) => st.profile);
   return (
-    <View style={[styles.header, { paddingTop: insets.top + s(10), paddingHorizontal: s(16), backgroundColor: c.bg }]}>
+    <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) + s(10), paddingHorizontal: s(16), backgroundColor: c.bg }]}>
       <Text style={{ fontSize: s(28), fontWeight: "700", flex: 1 }} accessibilityRole="header" numberOfLines={1}>
         {title}
       </Text>
@@ -60,7 +60,7 @@ export function SearchBar({ value, onChange, placeholder }: { value: string; onC
   const c = usePalette();
   const { s } = useScale();
   return (
-    <View style={[styles.search, { backgroundColor: c.surface, marginHorizontal: s(16), marginTop: s(6), marginBottom: s(10) }]}>
+    <View style={[styles.search, { backgroundColor: c.surface, marginHorizontal: s(16), marginTop: s(8), marginBottom: s(12) }]}>
       <Icon name="search" size={18} color={c.muted} />
       <TextInput
         value={value}
@@ -108,9 +108,9 @@ export const ChatRow = memo(function ChatRow({ chat, meId }: { chat: ChatSummary
       onLongPress={() => chatActions(chat)}
       accessibilityRole="button"
       accessibilityLabel={`${name}${unread ? `, ${chat.unreadCount} unread` : ""}`}
-      style={({ pressed }) => [styles.row, { paddingHorizontal: s(16), paddingVertical: s(12) }, pressed && { backgroundColor: c.surface }]}
+      style={({ pressed }) => [styles.row, { paddingHorizontal: s(16), paddingVertical: 13 }, pressed && { backgroundColor: c.surface }]}
     >
-      <Avatar name={name} uri={chat.type === "group" ? null : avatarImageUrl(chat.other)} group={chat.type === "group"} size={s(50)} />
+      <Avatar name={name} uri={chat.type === "group" ? null : avatarImageUrl(chat.other)} group={chat.type === "group"} size={48} />
       <View style={{ flex: 1, marginLeft: s(14), minWidth: 0 }}>
         <View style={styles.rowLine}>
           <Text style={[styles.rowTitle, unread && { fontWeight: "700" }]} numberOfLines={1}>
@@ -224,7 +224,7 @@ export function ChatListScreen({ groupsOnly }: { groupsOnly: boolean }) {
           data={list}
           renderItem={renderItem}
           keyExtractor={(item) => item.chatId}
-          ItemSeparatorComponent={() => <Divider inset={80} />}
+          ItemSeparatorComponent={() => <Divider inset={78} />}
           keyboardDismissMode="on-drag"
           contentContainerStyle={{ paddingBottom: 24 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} colors={[c.primary]} />}

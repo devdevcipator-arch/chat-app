@@ -83,7 +83,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "android.permission.CAMERA",
       "android.permission.BLUETOOTH_CONNECT",
       "android.permission.WAKE_LOCK",
-      ...(pushAndroid ? ["android.permission.POST_NOTIFICATIONS", "android.permission.USE_FULL_SCREEN_INTENT"] : []),
+      // Ringing (Vibration API) and local notifications for messages / calls.
+      "android.permission.VIBRATE",
+      "android.permission.POST_NOTIFICATIONS",
+      ...(pushAndroid ? ["android.permission.USE_FULL_SCREEN_INTENT"] : []),
     ],
     blockedPermissions: [
       "android.permission.READ_EXTERNAL_STORAGE",
@@ -120,6 +123,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     "expo-video",
+    // Local notifications (no Firebase needed), see src/services/localNotifications.ts.
+    "expo-notifications",
     "./plugins/withAndroidRelease",
     ...(pushEnabled ? ["@react-native-firebase/app", "@react-native-firebase/messaging"] : []),
   ],

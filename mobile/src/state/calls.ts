@@ -1,5 +1,6 @@
-import { PermissionsAndroid, Platform } from "react-native";
+import { Alert, Linking, PermissionsAndroid, Platform } from "react-native";
 import { create } from "zustand";
+import { Ringer } from "../calls/ringer";
 import { type AgoraToken, CallRepo, StartCallError } from "../data/calls";
 import { ProfileRepo } from "../data/profiles";
 import { AppError } from "../lib/errors";
@@ -63,6 +64,10 @@ export const useCall = create<CallState>(() => ({ ...IDLE }));
 
 const RING_TIMEOUT = 30_000;
 const HEARTBEAT = 15_000;
+/** A ringing row older than this is stale (the server treats > 45 s as gone). */
+const STALE_RING = 45_000;
+/** While ringing, re-read the row in case a Realtime event was missed. */
+const RING_POLL = 3_000;
 /** Set by the lock-screen "Accept" action so the call is picked up on launch. */
 export const PENDING_ACCEPT_KEY = "calls.pendingAccept";
 
@@ -74,6 +79,7 @@ let ringTimer: ReturnType<typeof setTimeout> | null = null;
 let incomingTimer: ReturnType<typeof setTimeout> | null = null;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let dismissTimer: ReturnType<typeof setTimeout> | null = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 /** The Agora module, loaded on first use (never at app startup). */
 let agora: typeof AgoraModule | null = null;
@@ -95,8 +101,50 @@ const title = () => get().groupTitle ?? profileName(get().peer);
 
 function clearTimers() {
   for (const t of [ringTimer, incomingTimer, dismissTimer]) if (t) clearTimeout(t);
-  if (heartbeatTimer) clearInterval(heartbeatTimer);
-  ringTimer = incomingTimer = dismissTimer = heartbeatTimer = null;
+  for (const t of [heartbeatTimer, pollTimer]) if (t) clearInterval(t);
+  ringTimer = incomingTimer = dismissTimer = heartbeatTimer = pollTimer = null;
+}
+
+/**
+ * Safety net while a 1-on-1 call rings: Realtime normally delivers
+ * accepted / declined / cancelled instantly, but if an event is lost (socket
+ * reconnecting, app just resumed) the row is re-read every few seconds.
+ */
+function pollWhileRinging(callId: string) {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    const { phase, call } = get();
+    if ((phase !== "outgoing" && phase !== "incoming") || call?.id !== callId) {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = null;
+      return;
+    }
+    const row = await CallRepo.fetch(callId).catch(() => null);
+    if (row && row.status !== "ringing" && get().call?.id === callId) onCallChange("UPDATE", row);
+  }, RING_POLL);
+}
+
+// Ring / ringback / vibration follow the phase, so every way out of ringing
+// (accept, decline, cancel, timeout, answered elsewhere, sign-out) stops them.
+useCall.subscribe((st, prev) => {
+  if (st.phase === prev.phase) return;
+  if (st.phase === "incoming") Ringer.start("ring");
+  else if (st.phase === "outgoing") Ringer.start("ringback");
+  else Ringer.stop();
+});
+
+/** Explains a refused permission, with a shortcut to the app's settings. */
+function permissionAlert(video: boolean) {
+  Alert.alert(
+    video ? "Camera and microphone needed" : "Microphone needed",
+    video
+      ? "Allow Chat App to use your microphone and camera to make and answer video calls."
+      : "Allow Chat App to use your microphone to make and answer calls.",
+    [
+      { text: "Not now", style: "cancel" },
+      { text: "Open settings", onPress: () => void Linking.openSettings().catch(() => {}) },
+    ],
+  );
 }
 
 function releaseEngine() {
@@ -195,6 +243,9 @@ function onCallChange(event: "INSERT" | "UPDATE", row: CallRow) {
 
 async function onIncoming(row: CallRow) {
   if (busy() || get().call?.id === row.id) return;
+  if (row.status !== "ringing" || row.calleeId !== meId) return;
+  const age = Date.now() - Date.parse(row.createdAt);
+  if (Number.isFinite(age) && age > STALE_RING) return; // rang out long ago
   const g = ++gen;
   const caller = await ProfileRepo.fetchPublic(row.callerId).catch(() => null);
   if (g !== gen || busy()) return;
@@ -205,8 +256,8 @@ async function onIncoming(row: CallRow) {
     isVideo: row.callType === "video",
     phase: "incoming",
   });
-  const age = Date.now() - Date.parse(row.createdAt);
-  const left = Math.max(5000, RING_TIMEOUT + 5000 - age);
+  const left = Math.max(5000, RING_TIMEOUT + 5000 - (Number.isFinite(age) ? age : 0));
+  pollWhileRinging(row.id);
   incomingTimer = setTimeout(() => {
     if (get().phase === "incoming" && get().call?.id === row.id) finish(`Missed call from ${profileName(get().peer)}.`);
   }, left);
@@ -258,6 +309,10 @@ async function connect() {
       onJoinChannelSuccess: () => {
         if (!mine()) return;
         set({ connectedAt: Date.now(), ...(get().groupTitle ? {} : { phase: "active" as const }) });
+        // The audio route can only be switched once in the channel.
+        try {
+          rtc.setEnableSpeakerphone(get().speakerOn);
+        } catch {}
         startHeartbeat(row.id);
       },
       onUserJoined: (_connection, uid) => {
@@ -295,15 +350,24 @@ async function connect() {
         }
       },
     });
+    // Same setup as web (agora-client.ts: mode "rtc", publishes mic + camera):
+    // a communication-profile broadcaster that publishes and subscribes.
+    rtc.setChannelProfile(A.ChannelProfileType.ChannelProfileCommunication);
+    rtc.setClientRole(A.ClientRoleType.ClientRoleBroadcaster);
     rtc.enableAudio();
-    const { isVideo, cameraOff, speakerOn } = get();
+    rtc.enableLocalAudio(true);
+    const { isVideo, cameraOff, speakerOn, micMuted } = get();
+    if (micMuted) rtc.muteLocalAudioStream(true);
     if (isVideo) {
       rtc.enableVideo();
       if (cameraOff) rtc.enableLocalVideo(false);
       else rtc.startPreview();
     }
     rtc.setDefaultAudioRouteToSpeakerphone(speakerOn);
-    rtc.joinChannelWithUserAccount(token.token, token.channelName, me, {
+    // /api/agora/token signs the Supabase user id as an Agora *user account*
+    // (buildTokenWithUserAccount, and web joins with that same string uid), so
+    // the native side joins with the account; a numeric uid would be rejected.
+    const code = rtc.joinChannelWithUserAccount(token.token, token.channelName, me, {
       clientRoleType: A.ClientRoleType.ClientRoleBroadcaster,
       channelProfile: A.ChannelProfileType.ChannelProfileCommunication,
       publishMicrophoneTrack: true,
@@ -311,6 +375,7 @@ async function connect() {
       autoSubscribeAudio: true,
       autoSubscribeVideo: true,
     });
+    if (typeof code === "number" && code < 0) throw new Error(`joinChannelWithUserAccount failed (${code})`);
   } catch (e) {
     console.warn("Agora join failed", e);
     if (g !== gen) return;
@@ -355,9 +420,12 @@ export const Calls = {
     if (busy()) return;
     const g = ++gen;
     fresh({ chatId, peer, isVideo: video, speakerOn: video, phase: "starting" });
+    // Runtime permissions first: never ring someone we can't talk to.
     if (!(await permissions(video))) {
-      if (g === gen)
+      if (g === gen) {
         finish(video ? "Camera and microphone access are needed for video calls." : "Microphone access is needed for calls.");
+        permissionAlert(video);
+      }
       return;
     }
     if (g !== gen) return;
@@ -378,6 +446,7 @@ export const Calls = {
       return;
     }
     set({ call: row, phase: "outgoing" });
+    pollWhileRinging(row.id);
     ringTimer = setTimeout(async () => {
       if (get().phase !== "outgoing" || get().call?.id !== row.id) return;
       await CallRepo.end(row.id, true);
@@ -391,7 +460,10 @@ export const Calls = {
     const g = ++gen;
     fresh({ chatId, groupTitle, groupMembers: members, isVideo: video, speakerOn: true, phase: "group" });
     if (!(await permissions(video))) {
-      if (g === gen) finish("Microphone access is needed for calls.");
+      if (g === gen) {
+        finish("Microphone access is needed for calls.");
+        permissionAlert(video);
+      }
       return;
     }
     let row: CallRow;
@@ -426,7 +498,10 @@ export const Calls = {
     set({ phase: "connecting", speakerOn: isVideo });
     if (!(await permissions(isVideo))) {
       await CallRepo.answer(row.id, false);
-      if (g === gen) finish("Microphone access is needed for calls.");
+      if (g === gen) {
+        finish("Microphone access is needed for calls.");
+        permissionAlert(isVideo);
+      }
       return;
     }
     const answered = await CallRepo.answer(row.id, true);
@@ -437,6 +512,22 @@ export const Calls = {
     }
     set({ call: answered });
     await connect();
+  },
+
+  /** "Accept" on the incoming-call notification. */
+  async acceptFromNotification(callId: string) {
+    const { phase, call } = get();
+    if (phase === "incoming" && call?.id === callId) return Calls.accept();
+    // Not ringing in this process yet (app was killed): answer once it is.
+    storage.set(PENDING_ACCEPT_KEY, callId);
+    await Calls.checkRinging();
+  },
+
+  /** "Decline" on the incoming-call notification. */
+  async declineFromNotification(callId: string) {
+    const { phase, call } = get();
+    if (phase === "incoming" && call?.id === callId) return Calls.decline();
+    await CallRepo.answer(callId, false);
   },
 
   async decline() {
