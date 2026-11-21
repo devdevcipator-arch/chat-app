@@ -49,7 +49,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // React Native 0.88 runs only on the New Architecture (there is no switch
   // any more); Hermes is the JS engine.
   jsEngine: "hermes",
-  splash: { image: "./assets/icon.png", resizeMode: "contain", backgroundColor: "#0A0A0A" },
+  // Brand logo (assets/*.png are generated from the source logo, white removed).
+  splash: { image: "./assets/splash-icon.png", resizeMode: "contain", backgroundColor: "#FFFFFF" },
   ios: {
     bundleIdentifier: "com.devcipator.chatApp",
     buildNumber: String(buildNumber),
@@ -71,7 +72,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Kept identical to the Flutter app so this APK updates existing installs.
     package: "com.devcipator.chat_app",
     versionCode: buildNumber,
-    adaptiveIcon: { foregroundImage: "./assets/icon.png", backgroundColor: "#0A0A0A" },
+    adaptiveIcon: { foregroundImage: "./assets/adaptive-icon.png", backgroundColor: "#FFFFFF" },
     softwareKeyboardLayoutMode: "resize",
     ...(pushAndroid ? { googleServicesFile: "./google-services.json" } : {}),
     permissions: [
@@ -124,7 +125,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     "expo-video",
     // Local notifications (no Firebase needed), see src/services/localNotifications.ts.
-    "expo-notifications",
+    // White silhouette for the status bar; tinted with the logo orange.
+    ["expo-notifications", { icon: "./assets/notification-icon.png", color: "#FF4D2E" }],
     "./plugins/withAndroidRelease",
     ...(pushEnabled ? ["@react-native-firebase/app", "@react-native-firebase/messaging"] : []),
   ],
