@@ -13,6 +13,7 @@ import {
   profileFromRow,
   profileName,
 } from "../models/types";
+import { notifyPush } from "../services/pushNotify";
 
 type Row = Record<string, unknown>;
 
@@ -100,7 +101,9 @@ export const ChatRepo = {
 
   /** Inserts a message with a client-chosen id; `created_at` is set by the server. */
   async insertMessage(values: Row): Promise<ChatMessage> {
-    return messageFromRow(unwrap(await supabase.from("messages").insert(values).select().single()) as Row);
+    const message = messageFromRow(unwrap(await supabase.from("messages").insert(values).select().single()) as Row);
+    notifyPush({ type: "new_message", messageId: message.id });
+    return message;
   },
 
   async fetchMessage(id: string): Promise<ChatMessage | null> {

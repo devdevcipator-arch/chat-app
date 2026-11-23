@@ -4,6 +4,7 @@ import type { MessageRow } from "@/lib/chat";
 import { AUDIO_TYPES, type AudioMimeType } from "@/lib/media";
 import { UploadError, requestUploadUrl, uploadToR2 } from "@/lib/media-client";
 import { VOICEMAIL_MAX_SECONDS } from "@/lib/call/types";
+import { notifyPush } from "@/lib/push-client";
 
 // Browser-only voicemail helpers: pick a recording format, then upload the
 // recording to R2 through the normal media pipeline and post the message.
@@ -69,6 +70,7 @@ export async function sendVoicemail(supabase: Client, input: SendVoicemailInput)
     result = await supabase.from("messages").insert({ ...row, call_id: null }).select().single();
   }
   if (result.error || !result.data) throw new UploadError("Voicemail not sent. Please try again.");
+  notifyPush({ type: "new_message", messageId: result.data.id });
   return result.data;
 }
 

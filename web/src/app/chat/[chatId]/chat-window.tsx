@@ -44,6 +44,7 @@ import { chatUploadRule, formatLimit, type ChatUploadKind } from "@/lib/chat-upl
 import { EditError, editMessage } from "@/lib/message-edit";
 import { saveChat } from "@/lib/chat-cache";
 import { realtimeHub } from "@/lib/realtime";
+import { notifyPush } from "@/lib/push-client";
 import { createClient } from "@/lib/supabase/client";
 import { formatBytes } from "@/lib/vault";
 import { markVoicemailPlayed } from "@/lib/voicemail-client";
@@ -243,6 +244,7 @@ export function ChatWindow({ chatId, meId, other, details: initialDetails, initi
       if (error?.code === "PGRST204") ({ data, error } = await insert(false));
       if (error || !data) throw new UploadError("Message not sent. Please try again.");
       setMessages((prev) => mergeMessages(prev, [data]));
+      notifyPush({ type: "new_message", messageId: data.id });
     },
     [supabase, chatId, meId],
   );

@@ -6,6 +6,7 @@ import { ProfileRepo } from "../data/profiles";
 import { AppError } from "../lib/errors";
 import { storage } from "../lib/storage";
 import { type CallRow, type Profile, profileName } from "../models/types";
+import { notifyPush } from "../services/pushNotify";
 import { useChats } from "./chats";
 import { Realtime } from "./realtime";
 import type * as AgoraModule from "react-native-agora";
@@ -530,6 +531,7 @@ export const Calls = {
       return;
     }
     set({ call: row, phase: "outgoing" });
+    notifyPush({ type: "incoming_call", callId: row.id });
     prefetchToken(row);
     pollWhileRinging(row.id);
     ringTimer = setTimeout(async () => {

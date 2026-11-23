@@ -16,9 +16,9 @@ import { supabase } from "../lib/supabase";
  *            other account that had this device before (security definer)
  *   - table  user_push_tokens, unique (user_id, token); RLS lets me delete my own rows
  *   - column profiles.push_notifications_enabled boolean (I may update my own)
- *   - a sender that posts FCM data messages:
- *       { type: "call", call_id, chat_id, caller_name, call_type: "voice"|"video" }
- *       { type: "message", chat_id, title, body }
+ *   - web POST /api/push/notify sends FCM data messages:
+ *       { type: "incoming_call", callId, chatId, callType, callerName, createdAt }
+ *       { type: "new_message", messageId, chatId, senderName, title, preview }
  */
 export const PUSH_COMPILED_IN = Constants.expoConfig?.extra?.pushEnabled === true;
 
@@ -47,6 +47,9 @@ async function requestOsPermission(m: Messaging): Promise<boolean> {
     if (result !== PermissionsAndroid.RESULTS.GRANTED) return false;
   }
   const status = await m.requestPermission(m.getMessaging());
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const notifee = require("@notifee/react-native") as typeof import("@notifee/react-native");
+  await notifee.default.requestPermission();
   return status === m.AuthorizationStatus.AUTHORIZED || status === m.AuthorizationStatus.PROVISIONAL;
 }
 
@@ -135,6 +138,10 @@ async function unregister() {
 
 export const Push = {
   async attach(_userId: string) {
+    if (PUSH_COMPILED_IN) {
+      const { onAppReady } = await import("./callNotifications");
+      await onAppReady();
+    }
     if (usePushPref.getState().enabled) await register();
   },
 
@@ -148,6 +155,10 @@ export const Push = {
 
   /** Signed out (or the session ended): stop token refresh and drop the local token. */
   async detach() {
+    if (PUSH_COMPILED_IN) {
+      const { onAppSignedOut } = await import("./callNotifications");
+      onAppSignedOut();
+    }
     await unregister();
   },
 

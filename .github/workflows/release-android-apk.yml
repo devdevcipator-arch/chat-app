@@ -76,16 +76,28 @@ jobs:
           } > .env
 
       # Optional: push notifications / lock-screen call ringing are compiled in
-      # only when this secret holds the Firebase google-services.json.
+      # only when a secret holds the Firebase google-services.json, either
+      # base64-encoded (GOOGLE_SERVICES_JSON_BASE64, preferred) or as plain JSON.
       - name: Write google-services.json (optional)
         env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
-          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | tr -d '[:space:]' | base64 --decode > google-services.json
+          elif [ -n "$GOOGLE_SERVICES_JSON" ]; then
             printf '%s' "$GOOGLE_SERVICES_JSON" > google-services.json
+          fi
+          if [ -f google-services.json ]; then
+            # A corrupt secret must fail here, not ship an APK without push.
+            if ! node -e "const c=JSON.parse(require('fs').readFileSync('google-services.json','utf8')); if(!c.project_info||!c.client) process.exit(1)"; then
+              rm -f google-services.json
+              echo "::error::The Firebase secret is not a valid google-services.json."
+              exit 1
+            fi
             echo "Push notifications: enabled"
           else
-            echo "Push notifications: not configured (no GOOGLE_SERVICES_JSON secret)"
+            echo "Push notifications: not configured (no GOOGLE_SERVICES_JSON_BASE64 secret)"
           fi
 
       - name: Install dependencies

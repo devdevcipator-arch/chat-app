@@ -329,6 +329,30 @@ export type Database = {
         }
         Relationships: []
       }
+      user_push_tokens: {
+        Row: {
+          id: string
+          platform: string
+          token: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          platform: string
+          token: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          platform?: string
+          token?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_gallery: {
         Row: {
           created_at: string
@@ -391,6 +415,14 @@ export type Database = {
       add_group_members: {
         Args: { p_chat_id: string; p_member_ids: string[] }
         Returns: number
+      }
+      get_push_targets: {
+        Args: { p_call_id?: string; p_message_id?: string }
+        Returns: Json
+      }
+      register_push_token: {
+        Args: { p_platform: string; p_token: string }
+        Returns: undefined
       }
       answer_call: {
         Args: { p_accept: boolean; p_call_id: string }

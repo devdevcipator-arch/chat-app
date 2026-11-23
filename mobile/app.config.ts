@@ -31,6 +31,8 @@ const PROGUARD_RULES = `
 -dontwarn app.notifee.**
 -keep class com.google.firebase.** { *; }
 -dontwarn com.google.firebase.**
+# Local Expo module (found by name at runtime).
+-keep class expo.modules.calllockscreen.** { *; }
 # Native method names must survive obfuscation.
 -keepclasseswithmembernames class * { native <methods>; }
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
@@ -87,12 +89,19 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // Ringing (Vibration API) and local notifications for messages / calls.
       "android.permission.VIBRATE",
       "android.permission.POST_NOTIFICATIONS",
-      ...(pushAndroid ? ["android.permission.USE_FULL_SCREEN_INTENT"] : []),
+      // Killed-state call ringing (only in builds with Firebase).
+      ...(pushAndroid
+        ? [
+            "android.permission.USE_FULL_SCREEN_INTENT",
+            "android.permission.FOREGROUND_SERVICE",
+            "android.permission.SYSTEM_ALERT_WINDOW",
+          ]
+        : []),
     ],
     blockedPermissions: [
       "android.permission.READ_EXTERNAL_STORAGE",
       "android.permission.WRITE_EXTERNAL_STORAGE",
-      "android.permission.SYSTEM_ALERT_WINDOW",
+      ...(pushAndroid ? [] : ["android.permission.SYSTEM_ALERT_WINDOW"]),
       "android.permission.READ_PHONE_STATE",
     ],
   },

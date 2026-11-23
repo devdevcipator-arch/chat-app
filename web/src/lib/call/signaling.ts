@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import { asCallType, isCallStatus, type CallRow, type CallSignal, type CallType } from "@/lib/call/types";
+import { notifyPush } from "@/lib/push-client";
 import { realtimeHub } from "@/lib/realtime";
 
 // Call signaling over Supabase: RPCs change state (server-validated) and
@@ -58,7 +59,11 @@ export type StartCallResult =
 
 export async function startCall(supabase: Client, chatId: string, callType: CallType): Promise<StartCallResult> {
   const { data, error } = await supabase.rpc("start_call", { p_chat_id: chatId, p_call_type: callType });
-  if (!error && data) return { ok: true, call: data };
+  if (!error && data) {
+    // Wake the callee's phone (group rooms don't ring).
+    if (!data.is_group) notifyPush({ type: "incoming_call", callId: data.id });
+    return { ok: true, call: data };
+  }
   if (error?.message === "callee busy") return { ok: false, reason: "callee-busy" };
   if (error?.message === "caller busy") return { ok: false, reason: "caller-busy" };
   if (error?.message === "call full") return { ok: false, reason: "call-full" };

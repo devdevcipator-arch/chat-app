@@ -5,7 +5,7 @@ import { chatName, messageSnippet, profileName } from "../models/types";
 import { Calls, useCall } from "../state/calls";
 import { useChats } from "../state/chats";
 import { Realtime } from "../state/realtime";
-import { usePushPref } from "./push";
+import { PUSH_COMPILED_IN, usePushPref } from "./push";
 
 /**
  * Local notifications (expo-notifications), driven by the app's Realtime
@@ -20,6 +20,7 @@ import { usePushPref } from "./push";
 const MESSAGES = "messages";
 const CALLS = "calls";
 const CALL_CATEGORY = "incoming-call";
+const PUSH_GRACE_MS = 2500;
 
 type Data = { kind?: string; chatId?: string; callId?: string };
 
@@ -77,8 +78,17 @@ async function ready(): Promise<boolean> {
   return ok;
 }
 
+/** In the background FCM may deliver the same item: give it a moment to win. */
+async function shownByPush(identifier: string) {
+  if (!PUSH_COMPILED_IN || inForeground()) return false;
+  await new Promise((resolve) => setTimeout(resolve, PUSH_GRACE_MS));
+  const { isDisplayed } = await import("./callNotifications");
+  return isDisplayed(identifier);
+}
+
 async function show(content: Notifications.NotificationContentInput, channelId: string, identifier?: string) {
   if (!enabled() || !(await ready())) return null;
+  if (identifier && (await shownByPush(identifier))) return null;
   try {
     return await Notifications.scheduleNotificationAsync({
       identifier,
@@ -109,6 +119,7 @@ function onMessage(message: import("../models/types").ChatMessage, isUpdate: boo
       sound: "default",
     },
     MESSAGES,
+    `msg:${message.id}`,
   );
 }
 

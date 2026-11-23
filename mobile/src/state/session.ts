@@ -1,5 +1,6 @@
 import { AppState } from "react-native";
 import { supabase } from "../lib/supabase";
+import { startCallLockScreen } from "../services/callLockScreen";
 import { LocalNotifications } from "../services/localNotifications";
 import { Push } from "../services/push";
 import { Auth, useAuth } from "./auth";
@@ -44,6 +45,7 @@ export function startSession() {
   if (started) return;
   started = true;
   Network.start();
+  startCallLockScreen();
   Auth.start();
   apply(useAuth.getState().userId);
   Auth.onAccountChange(apply);

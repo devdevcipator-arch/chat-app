@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { CopyObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import type { NextRequest } from "next/server";
+import { after, type NextRequest } from "next/server";
 import { UUID_PATTERN, type MessageRow } from "@/lib/chat";
+import { dispatchPush } from "@/lib/push/dispatch";
 import { getR2 } from "@/lib/r2";
 import { MESSAGE_TYPE_FOR, VAULT_KEY_PATTERN, asVaultKind, extensionOfKey } from "@/lib/vault";
 import { fail, loadOwnItem, ok, readJson } from "@/lib/vault-server";
@@ -76,6 +77,10 @@ export async function POST(request: NextRequest, ctx: RouteContext<"/api/gallery
     await r2.client.send(new DeleteObjectCommand({ Bucket: r2.bucket, Key: target })).catch(() => {});
     return fail(500, "Couldn't send to that chat. Please try again.");
   }
+
+  // Wake the recipients after responding.
+  const messageId = data.id;
+  after(() => dispatchPush(supabase, { messageId }));
 
   return ok<MessageRow>(data, 201);
 }
